@@ -104,8 +104,8 @@ impl VestingContract {
     /// - `VestingError::NotAdmin` — Caller is not the admin.
     /// - `VestingError::InvalidAmount` — total_amount ≤ 0.
     /// - `VestingError::InvalidSchedule` — vesting_duration ≤ cliff_duration.
+    /// - `VestingError::GrantAlreadyExists` — A grant already exists for this beneficiary.
     /// - `VestingError::InvalidAddress` — beneficiary is contract address.
-    /// - `VestingError::GrantAlreadyExists` — grant already exists for beneficiary.
     ///
     /// **Security:** Requires `admin.require_auth()`. Tokens must be transferred
     /// to contract separately before creating grants.
@@ -120,15 +120,15 @@ impl VestingContract {
     ) -> Result<(), VestingError> {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
+        require_not_self(&env, &beneficiary)?;
         require_non_negative_amount(total_amount)?;
 
         if total_amount <= 0 {
             return Err(VestingError::InvalidAmount);
         }
         if vesting_duration <= cliff_duration {
-            return Err(VestingError::InvalidVestingSchedule);
+            return Err(VestingError::InvalidSchedule);
         }
-        require_not_self(&env, &beneficiary)?;
 
         let key = DataKey::Grant(beneficiary.clone());
         if env.storage().persistent().has(&key) {
@@ -370,11 +370,11 @@ impl VestingContract {
     /// - Before cliff: 0
     /// - After cliff, before full vesting: Linear proportion based on time
     /// - After full vesting: total_amount
-    /// - If revoked and revocation happened at or before `at_time`: freeze at revoked_at
-    /// - If revoked but revocation after `at_time`: use `at_time` for historical snapshot
-    fn calculate_vested_at(grant: &VestingGrant, at_time: u64) -> Result<i128, VestingError> {
-        let effective_time = if grant.revoked && grant.revoked_at <= at_time {
-            grant.revoked_at
+    /// - If revoked: freeze calculation at revocation timestamp
+    fn calculate_vested(env: &Env, grant: &VestingGrant) -> Result<i128, VestingError> {
+        let now = env.ledger().timestamp();
+        let effective_time = if grant.revoked {
+            grant.revoked_at.unwrap_or(now)
         } else {
             at_time
         };
@@ -577,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "VestingError(InvalidVestingSchedule)")]
+    #[should_panic(expected = "VestingError(InvalidSchedule)")]
     fn test_invalid_schedule_cliff_equals_duration() {
         let env = Env::default();
         env.mock_all_auths();

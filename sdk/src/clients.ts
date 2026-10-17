@@ -1,4 +1,4 @@
-import { Keypair, scValToNative } from "@stellar/stellar-sdk";
+import { Keypair, scValToNative, nativeToScVal, xdr } from "@stellar/stellar-sdk";
 import { BaseClient, NetworkConfig } from "./base";
 import {
   Invoice,
@@ -9,6 +9,32 @@ import {
   RiskTier,
   SmeProfile,
 } from "./types";
+
+/**
+ * Converts a SHA-256 hex digest into the exact 32 raw bytes committed on-chain
+ * as `metadata_hash: Bytes` (issue #1002). Throws on malformed input so a
+ * truncated/aliased hash can never silently enter a mint transaction.
+ */
+export function metadataHashToBytes(metadataHashHex: string): Buffer {
+  if (
+    metadataHashHex.length !== 64 ||
+    /[^0-9a-fA-F]/.test(metadataHashHex)
+  ) {
+    throw new Error("Invalid metadata_hash: expected a 32-byte SHA-256 hex digest.");
+  }
+  return Buffer.from(metadataHashHex, "hex");
+}
+
+/**
+ * Encodes an optional string argument (`Option<String>` per the invoice_nft
+ * API). Soroban represents `Option` as a 0-or-1 element `ScVec`, so `null` is
+ * encoded as an empty vec (`Option::None`) — compatible with the contract's
+ * `notes` parameter.
+ */
+export function optionalString(value: string | null | undefined): xdr.ScVal {
+  if (value == null) return xdr.ScVal.scvVec([]);
+  return xdr.ScVal.scvVec([nativeToScVal(value, { type: "string" })]);
+}
 
 // ── InvoiceNftClient ──────────────────────────────────────────────────────────
 
@@ -24,7 +50,8 @@ export class InvoiceNftClient extends BaseClient {
     currency: string,
     dueDate: bigint,
     ipfsCid: string,
-    riskScore: number
+    riskScore: number,
+    notes?: string | null
   ): Promise<bigint> {
     const result = await this.invoke(
       "mint_invoice",
@@ -36,10 +63,34 @@ export class InvoiceNftClient extends BaseClient {
         this.u64(dueDate),
         this.str(ipfsCid),
         this.u32(riskScore),
+        optionalString(notes ?? null),
       ],
       sme
     );
     return scValToNative(result) as bigint;
+  }
+
+  /**
+   * Commits the document `metadata_hash` (SHA-256 of the pinned document
+   * bytes, passed as raw 32-byte `Bytes`) for a freshly minted invoice,
+   * per `invoice_nft::commit_metadata_hash` (issue #1002).
+   */
+  async commitMetadataHash(
+    sme: Keypair,
+    invoiceId: bigint,
+    metadataHash: Buffer | Uint8Array
+  ): Promise<void> {
+    const hash = Buffer.isBuffer(metadataHash)
+      ? metadataHash
+      : Buffer.from(metadataHash);
+    if (hash.byteLength !== 32) {
+      throw new Error("Invalid metadata_hash: expected 32 raw bytes (SHA-256).");
+    }
+    await this.invoke(
+      "commit_metadata_hash",
+      [this.addr(sme.publicKey()), this.u64(invoiceId), this.bytes(hash)],
+      sme
+    );
   }
 
   async getInvoice(invoiceId: bigint): Promise<Invoice> {

@@ -2,7 +2,7 @@
 # Kora Protocol — Makefile
 # =============================================================================
 
-.PHONY: build test clean fmt lint check audit coverage coverage-per-contract deploy-testnet deploy-mainnet fuzz fuzz-deep help build-optimized test-verbose setup sizes
+.PHONY: build test clean fmt lint check check-access-matrix audit coverage coverage-per-contract deploy-testnet deploy-mainnet fuzz fuzz-deep help build-optimized test-verbose setup sizes
 
 WASM_TARGET := wasm32-unknown-unknown
 CONTRACTS   := access_control invoice_nft marketplace financing_pool treasury risk_registry price_oracle tranche dispute_resolution dispute_escrow governance governance_voting parameter_registry
@@ -52,6 +52,7 @@ help:
 	@echo "  fmt                  Format all Rust code using cargo fmt"
 	@echo "  lint                 Run clippy linter with strict warnings-as-errors"
 	@echo "  check                Run cargo check on all packages"
+	@echo "  check-access-matrix  Verify entrypoint auth matches docs/ACCESS_MATRIX.md"
 	@echo "  audit                Run cargo-deny and cargo-audit for supply chain security"
 	@echo ""
 	@echo "Deployment targets:"
@@ -104,6 +105,11 @@ lint:
 
 check:
 	cargo check --all
+
+# Verify every contract entrypoint's authorization matches docs/ACCESS_MATRIX.md
+# (single source of truth; the checker parses the markdown — no hardcoded copy).
+check-access-matrix:
+	cargo run -p kora-xtask --bin check_access_matrix
 
 # ── Fuzz ──────────────────────────────────────────────────────────────────────
 

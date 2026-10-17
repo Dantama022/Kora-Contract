@@ -94,3 +94,42 @@ Run unit tests and verification via:
 cd apps/web
 node tests/runTests.js
 ```
+
+## Issue #1001 — Real IPFS Pinning Client in the Invoice Wizard
+
+`InvoiceSubmissionWizard` uploads invoice documents through the
+`services/ipfs-pinning` REST API via `src/services/ipfsPinningClient.ts`
+(POST `/pins` upload + pin, GET `/pins/:cid` status polling, GET
+`/pins/:cid/content` for byte-exact verification). When no pinning service is
+configured the wizard falls back to the deterministic local dev mock, which is
+never used in production paths.
+
+### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `VITE_IPFS_PINNING_URL` | No | Base URL of the ipfs-pinning service REST API (e.g. `https://pins.kora.finance`). Unset → local dev mock pinning. When set, every document upload goes through the real service and produces a content-derived CID (no mock CID prefix). |
+
+## Issue #1002 — metadata_hash Validation Before Invoice Mint
+
+Before the mint step the wizard:
+
+1. Computes SHA-256 over the exact document bytes with Web Crypto
+   (`InvoiceWizardService.computeMetadataHash`) — browsers without
+   `crypto.subtle` get a graceful "unsupported" message and minting stays
+   disabled.
+2. Rejects empty files *before* the hash step.
+3. Displays the SHA-256 (`metadata_hash` byte commitment) on the review step
+   and re-verifies the pinned bytes retrieved from the pinning service
+   (`verifyPinnedDocumentHash`) — this mirrors
+   `services/ipfs-pinning/src/verifier.ts` client-side, and any gateway
+   content swap **fails closed**: the mint button stays disabled while the
+   computed hash differs from the displayed/confirmed hash.
+4. Passes the validated 32-byte hash to the mint channel (SDK hook via
+   `InvoiceWizardService.setMintSubmitter`, compatible with the
+   `invoice_nft` mint API and `commit_metadata_hash`), and fires an optional
+   analytics hook (`InvoiceWizardService.setHashMismatchListener`) whenever a
+   mismatch is detected.
+
+See `docs/debtor-attestation.md` for the full metadata pipeline.
+

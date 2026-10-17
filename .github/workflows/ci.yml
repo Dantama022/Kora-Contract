@@ -179,6 +179,9 @@ jobs:
       - name: cargo run -p kora-xtask --bin check-error-variants
         run: cargo run -p kora-xtask --bin check-error-variants
 
+      - name: cargo run -p kora-xtask --bin check_access_matrix
+        run: cargo run -p kora-xtask --bin check_access_matrix
+
   # ── Unit & integration tests ──────────────────────────────────────────────
   test:
     name: cargo test
