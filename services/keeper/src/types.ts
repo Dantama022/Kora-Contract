@@ -9,7 +9,8 @@
 export type DeadlineKind =
   | "funding_expiry"   // Invoice listing funding deadline elapsed → trigger refunds
   | "due_date"         // Invoice repayment due date elapsed → eligible for default
-  | "grace_period_end";// Grace period after due_date elapsed → mark defaulted
+  | "grace_period_end" // Grace period after due_date elapsed → mark defaulted
+  | "listing_ttl";     // Active marketplace listing is below its TTL threshold
 
 /** Possible outcomes of a trigger attempt. */
 export type TriggerOutcome =
@@ -22,6 +23,7 @@ export type TriggerOutcome =
 export type JobStatus =
   | "pending"          // Waiting for deadline to arrive
   | "ready"            // Deadline has passed, not yet dispatched
+  | "failed"            // Transient failure waiting for retry back-off
   | "in_flight"        // Transaction submitted, awaiting confirmation
   | "done"             // Successfully triggered (or was already triggered)
   | "dead";            // Exhausted retries; manual inspection required
@@ -80,4 +82,12 @@ export interface KeeperConfig {
   retryBackoffBaseMs: number;
   /** Stellar network passphrase. */
   networkPassphrase: string;
+  /** Marketplace contract whose active listings are protected. */
+  marketplaceContractAddress: string;
+  /** Paginated REST endpoint returning indexed listings. */
+  activeListingsUrl: string;
+  /** Optional credential sent as a Bearer token to the listing endpoint. */
+  indexerApiKey: string;
+  /** Minimum remaining TTL in ledgers before a listing is bumped. */
+  ttlThresholdLedgers: number;
 }

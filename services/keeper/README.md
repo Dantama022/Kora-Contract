@@ -9,7 +9,7 @@ A resilient background keeper that watches on-chain deadlines (funding expiry, i
 ## Architecture
 
 ```
-Indexer (deadline data)
+Indexer (deadline data and active listings)
         │
         ▼
   Scheduler.enqueueDeadlines()
@@ -51,6 +51,19 @@ Indexer (deadline data)
 | `KEEPER_RETRY_BACKOFF_BASE_MS` | `60000` | Back-off base (ms) |
 | `KEEPER_HTTP_PORT` | `8080` | Observability HTTP port |
 | `STELLAR_NETWORK_PASSPHRASE` | testnet | Network passphrase |
+| `MARKETPLACE_CONTRACT_ID` | _(required)_ | Marketplace contract containing the listing entries |
+| `KEEPER_ACTIVE_LISTINGS_URL` | _(required)_ | Paginated indexer endpoint for active listings |
+| `KEEPER_INDEXER_API_KEY` | _(empty)_ | Optional Bearer token for the active-listings endpoint |
+| `KEEPER_TTL_THRESHOLD_LEDGERS` | `518400` | Bump listings below this remaining TTL |
+
+The active-listings endpoint receives `isActive=true`, `limit=100`, and an
+optional `cursor` query parameter. It must return pages shaped as
+`{"data":[{"invoiceId":"123","isActive":true}],"nextCursor":null}`;
+`invoiceId` is the marketplace listing's u64 key. The keeper checks each key's
+`liveUntilLedgerSeq` using Soroban RPC and enqueues a deduplicated bump job when
+fewer than the configured number of ledgers remain. A job key includes the
+observed expiry ledger, so a later TTL cycle can be scheduled after a successful
+bump. Keep the endpoint backed by the same indexer/network as `STELLAR_RPC_URL`.
 
 In deployed environments, inject `KEEPER_SECRET` and any RPC credentials from
 the environment-specific secret in AWS Secrets Manager using the workload's
@@ -91,3 +104,8 @@ npm test
 ```
 
 Minimum 90% line/branch/function/statement coverage enforced.
+
+TTL scan metrics are also exported at `/metrics`:
+`kora_keeper_ttl_listings_scanned_total`,
+`kora_keeper_ttl_listings_at_risk_total`, and
+`kora_keeper_ttl_scan_errors_total`.

@@ -154,6 +154,24 @@ genuine `caller.require_auth()` (a contract-to-contract auth check, since `finan
 it programmatically) and rejects unauthorized callers (`ReserveCallerNotAuthorized`) or amounts
 exceeding the reserve balance (`InsufficientReserveBalance`).
 
+### Grant Release Guards
+
+Grant milestone releases use the shared timelock delay captured when the treasury
+action is proposed. Execution waits for both that captured delay and the currently
+configured shared delay, so changing the delay cannot shorten an existing proposal.
+Delay changes are themselves treasury actions and cannot be set below 24 hours.
+
+Before a milestone transfer, treasury checks the governed
+`RegistryParamKey::MinReserveRatioBps` value. The parameter defaults to 1,000 bps
+(10%) and is bounded to 0–10,000 bps. After the release, the live token balance
+must remain at least the ceiling of the pre-release balance multiplied by this
+ratio; the independently earmarked `ReserveBalance(token)` must also remain
+untouched. The treasury's parameter-registry address must be configured before
+grant releases are enabled. Use `set_parameter_registry` before multisig setup,
+or the `SetParameterRegistry` treasury action once multisig governance is active.
+Registries upgraded from before this parameter existed receive the same 10% value
+as a read-time fallback until governance writes an explicit value.
+
 ---
 
 ## Multisig Quorum Gate
@@ -265,7 +283,7 @@ Sets or updates the price oracle contract address. Optional — if not set, conv
 - **Returns:** None
 - **Errors:** `NotAdmin` if caller is not the admin
 
-### `get_total_collected_value(tokens, token_symbols, reference_currency, token_decimals, ref_decimals)`
+### `get_total_collected_value(tokens, token_symbols, reference_currency, ref_decimals)`
 
 Aggregates collected fees across multiple tokens and converts them all to a single reference currency via the price oracle.
 
@@ -274,7 +292,6 @@ Aggregates collected fees across multiple tokens and converts them all to a sing
   - `tokens` — Vec of token contract addresses
   - `token_symbols` — Vec of token symbols (must match `tokens` length)
   - `reference_currency` — Target symbol for valuation (e.g., "USDC")
-  - `token_decimals` — Vec of token decimal places (must match `tokens` length)
   - `ref_decimals` — Decimal places of reference currency
 - **Returns:** Total collected fees in reference currency's smallest unit (i128)
 - **Behavior:**
@@ -282,7 +299,26 @@ Aggregates collected fees across multiple tokens and converts them all to a sing
   - If a price is unavailable for a token/reference pair, that token is skipped (graceful degradation)
   - Conversions use `price_oracle.convert_with_decimals()` for decimal-aware math
   - Overflow is saturated at `i128::MAX`
-- **Errors:** `InvalidAmount` if Vec lengths do not match
+- **Errors:** `InvalidAmount` if `tokens` and `token_symbols` lengths differ;
+  `TokenDecimalsNotRegistered` if a nonzero token balance has no registered precision.
+
+## Token Decimal Registry and Transparency Reports
+
+`set_token_decimals(admin, token, decimals)` registers the token's decimal
+precision for valuation and transparency reporting. Decimal values are restricted to 0–18;
+`get_token_decimals(token)` returns the configured value or `None` when the
+token has not been registered. Direct changes require the treasury admin and
+are blocked when treasury multisig quorum is configured. With quorum enabled,
+propose `TreasuryAction::SetTokenDecimals(token, decimals)` and execute it
+through the normal approval and timelock flow.
+
+`get_total_collected_value` uses this registry instead of caller-supplied token
+decimals. `generate_transparency_report` requires every requested token to have
+a registered decimal value and includes that precision with the raw inflow,
+outflow, and ending-balance amounts in each report entry. Consumers can
+therefore convert those integer amounts to human units without relying on
+off-chain guesses. Generation fails with `TokenDecimalsNotRegistered` rather
+than publishing a report with ambiguous units.
 
 ## Community Grants
 
@@ -309,7 +345,8 @@ treasury rather than being transferred to the recipient. The recipient receives
 only completed milestone amounts. Funds reserved for insurance are excluded
 from milestone balance checks.
 
-**Note:** This function currently requires the caller to pass the list of tokens. Once issue #36 (token registry) is implemented, a simpler parameterless `get_total_collected_value(reference_currency)` will iterate all whitelisted tokens automatically.
+**Note:** The decimal registry does not enumerate tokens, so callers still
+provide the token and symbol lists to this view.
 
 ---
 

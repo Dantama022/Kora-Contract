@@ -9,6 +9,8 @@ use soroban_sdk::{contracttype, Address, Env, Vec};
 #[derive(Clone, Debug)]
 pub struct TokenBalance {
     pub token: Address,
+    /// Number of decimal places used to convert raw amounts into human units.
+    pub decimals: u32,
     pub inflows: i128,
     pub outflows: i128,
     pub ending_balance: i128,
@@ -48,7 +50,14 @@ impl TreasuryReport {
     }
 
     /// Add or update a token entry in the report.
-    pub fn set_token_balance(&mut self, token: Address, inflows: i128, outflows: i128, ending_balance: i128) {
+    pub fn set_token_balance(
+        &mut self,
+        token: Address,
+        decimals: u32,
+        inflows: i128,
+        outflows: i128,
+        ending_balance: i128,
+    ) {
         // Find and update existing entry, or append new one
         let mut found = false;
         for i in 0..self.balances.len() {
@@ -56,6 +65,7 @@ impl TreasuryReport {
                 if entry.token == token {
                     self.balances.set(i, TokenBalance {
                         token: token.clone(),
+                        decimals,
                         inflows,
                         outflows,
                         ending_balance,
@@ -68,6 +78,7 @@ impl TreasuryReport {
         if !found {
             self.balances.push_back(TokenBalance {
                 token,
+                decimals,
                 inflows,
                 outflows,
                 ending_balance,

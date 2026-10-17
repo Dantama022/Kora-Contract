@@ -209,6 +209,7 @@ impl ParameterRegistryContract {
         // Treasury
         Self::write_param(env, admin, now, RegistryParamKey::TreasuryFeeBps, 50, 0, 10_000);
         Self::write_param(env, admin, now, RegistryParamKey::ReserveAllocationBps, 1_000, 0, 5_000);
+        Self::write_param(env, admin, now, RegistryParamKey::MinReserveRatioBps, 1_000, 0, 10_000);
     }
 
     fn write_param(
@@ -552,7 +553,24 @@ impl ParameterRegistryContract {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn get_parameter_raw(env: &Env, key: &RegistryParamKey) -> Option<RegistryParam> {
-        env.storage().persistent().get(&DataKey::Param(key.clone()))
+        let stored = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Param(key.clone()));
+        if stored.is_some() {
+            return stored;
+        }
+        if key == &RegistryParamKey::MinReserveRatioBps {
+            let admin: Address = env.storage().instance().get(&DataKey::Admin)?;
+            return Some(RegistryParam {
+                value: 1_000,
+                min_value: 0,
+                max_value: 10_000,
+                updated_at: 0,
+                updated_by: admin,
+            });
+        }
+        None
     }
 
     fn apply_param_update(
@@ -614,7 +632,8 @@ impl ParameterRegistryContract {
             | RegistryParamKey::MaxPositionBps
             | RegistryParamKey::SlashPercentageBps
             | RegistryParamKey::TreasuryFeeBps
-            | RegistryParamKey::ReserveAllocationBps => {
+            | RegistryParamKey::ReserveAllocationBps
+            | RegistryParamKey::MinReserveRatioBps => {
                 if value < 0 || value > 10_000 {
                     return Err(RegistryError::ParamValueOutOfBounds);
                 }
@@ -715,6 +734,7 @@ impl ParameterRegistryContract {
             RegistryParamKey::MinimumDebtorScore => 15,
             RegistryParamKey::TreasuryFeeBps => 16,
             RegistryParamKey::ReserveAllocationBps => 17,
+            RegistryParamKey::MinReserveRatioBps => 18,
         }
     }
 
@@ -811,6 +831,8 @@ mod tests {
         // minimum debtor score default = 0
         let score = client.get_value(&RegistryParamKey::MinimumDebtorScore);
         assert_eq!(score, 0);
+        let reserve_ratio = client.get_value(&RegistryParamKey::MinReserveRatioBps);
+        assert_eq!(reserve_ratio, 1_000);
     }
 
     #[test]

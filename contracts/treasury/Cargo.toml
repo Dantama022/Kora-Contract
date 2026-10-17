@@ -10,6 +10,7 @@ crate-type = ["cdylib", "rlib"]
 soroban-sdk = { workspace = true }
 kora-shared = { path = "../shared" }
 kora-access-control = { path = "../access_control" }
+kora-parameter-registry = { path = "../parameter_registry" }
 kora-price-oracle = { path = "../price_oracle" }
 kora-parameter-registry = { path = "../parameter_registry" }
 
