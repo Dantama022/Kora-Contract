@@ -11,6 +11,16 @@ This directory contains the off-chain backend services that complement the on-ch
 | [`risk-pipeline/`](risk-pipeline/) | [#755](https://github.com/OpenLedger-Foundation/Kora-Contract/issues/755) | Off-chain risk scoring data pipeline (suggested scores for verifier review) |
 | [`ipfs-pinning/`](ipfs-pinning/) | [#754](https://github.com/OpenLedger-Foundation/Kora-Contract/issues/754) | Redundant IPFS pinning service for invoice metadata |
 | [`api/gateway/`](api/gateway/) | [#753](https://github.com/OpenLedger-Foundation/Kora-Contract/issues/753) | Public read-only API gateway (invoices, listings, positions, risk scores) |
+| [`governance-sync/`](governance-sync/) | — | Reads governance-voting proposals and syncs them to a forum |
+| [`offchain-voting/`](offchain-voting/) | — | Off-chain vote collection using an injected on-chain governance source |
+| [`governance-sandbox/`](governance-sandbox/) | — | Simulates proposal impact against a supplied protocol snapshot |
+
+These governance services share the deployment manifest written to
+`deployments/<network>.json`. The canonical voting contract address is
+`contracts.governance_voting.address`. `governance-sync` can load this directly
+with `KORA_DEPLOYMENT_MANIFEST`; the injected source used by `offchain-voting`
+and snapshot provider used by `governance-sandbox` should use the same field when
+wiring their on-chain data adapters.
 
 All services are TypeScript, independently deployable, and share no runtime dependencies on each other. The `audit-log` service is consumed as a library by the others.
 

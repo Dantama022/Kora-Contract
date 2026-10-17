@@ -5,19 +5,68 @@ A comprehensive on-chain governance system for the Kora Protocol, supporting vot
 ## Deployment inputs and workspace CI
 
 `GovernanceVotingContractClient` is the generated Rust client for this crate.
-Initialize it with the admin address and the access-control contract address.
-These are explicit on-chain inputs; the contract reads no environment variables.
+Initialize it with the admin address, the access-control contract address, and
+optionally a vesting contract address (see [Weight Sources](#weight-sources)).
 For the forum bridge, `GOVERNANCE_CONTRACT_ID` must be this deployment's address,
 and `SOROBAN_RPC_URL` selects its network's RPC endpoint. See the bridge's
 [configuration and client mapping](../../services/governance-sync/README.md#configuration).
-The separate governance upgrade and parameter-registry addresses are incompatible.
 
 CI runs `cargo test -p kora-governance-voting` as a dedicated matrix entry (#912),
 with workspace fmt/clippy/tests also including the crate. Persistent proposal,
 vote, weight, and delegation writes extend TTL using the contract's bump helper.
-Release artifact `kora_governance_voting.wasm` is included in the size gate.
-No build, tests, or formatter were run for this onboarding change at the user's
-request; coverage percentages below are existing targets, not measured results.
+The cross-contract call to the vesting contract is gas-metered; cache snapshot
+results when possible during a single vote transaction.
+
+## Weight Sources
+
+Vote weight is computed from the beneficiary's **vested token balance** at the
+proposal's `created_at` snapshot timestamp, queried via a read-only cross-contract
+call to the Vesting contract (`get_vested_balance_at`). The admin configures the
+vesting contract address through `set_vesting_contract(admin, vesting_address)`.
+
+**Weight formula:**
+
+```
+weight = vested_balance(voter, proposal.created_at)
+```
+
+- If no grant exists for the voter, weight is 0.
+- If the grant was revoked before or at the snapshot time, weight is the
+  vested amount up to the revocation timestamp.
+- Multiple grants aggregate their vested balances.
+- **Unvested grant balance does not increase vote power.**
+- The old manual `set_voting_weight` storage is used only as a fallback when
+  no vesting contract is configured (see below).
+
+**Fallback behavior:** If `set_vesting_contract` has not been called, the
+`vote()` entrypoint falls back to the manually set `VotingWeight` storage
+(backward compatible). To enforce on-chain vesting weights, the admin must
+configure the vesting contract address. Once configured, manual weights are
+ignored and only vested balances are used.
+
+**Delegation** aggregates the vested balances of all delegators. The delegate's
+total voting weight is their own vested balance plus the sum of each delegator's
+vested balance at the current ledger timestamp.
+
+## Events
+
+Every vote emits a `voteCast` event with the following topics and fields:
+
+**Topics:**
+- `voteCast` — event discriminator
+- `SCHEMA_V` — schema version for indexers
+
+**Fields (tuple):**
+1. `proposal_id` (u64) — the proposal being voted on
+2. `voter` (Address) — the voting address
+3. `weight` (i128) — the effective vote weight applied
+4. `voice_credits` (i128) — voice credits spent (0 for standard mode)
+5. `choice` (u32) — 0=For, 1=Against, 2=Abstain
+6. `snapshot_at` (u64) — the proposal's `created_at` timestamp (vesting snapshot)
+7. `schema_v` (u32) — event schema version
+
+Off-chain indexers should use `snapshot_at` together with the voter address to
+reconcile vote weight against vesting contract state.
 
 ## Features
 
@@ -132,7 +181,8 @@ pub struct VoteRecord {
 ### Storage Keys
 
 - `Admin`: Admin address
-- `VotingWeight(Address)`: Stake/weight for address
+- `VotingWeight(Address)`: Stake/weight for address (fallback, used only when vesting not configured)
+- `Vesting`: Address of the Vesting contract (set by admin via `set_vesting_contract`)
 - `Delegation(Address)`: Delegator → delegate mapping
 - `DelegatedBy(Address)`: Reverse index for efficient weight calculation
 - `Proposal(u64)`: Proposal data by ID
@@ -163,13 +213,35 @@ pub fn set_voting_weight(
 ) -> Result<(), GovernanceError>
 ```
 
-Set voting weight for an address (admin only). In production, this would sync with actual stake.
+Set voting weight for an address (admin only). Used as fallback when no vesting
+contract is configured. When a vesting contract is set, weight is computed from
+the vested balance automatically and manual weights are ignored.
+
+```rust
+pub fn set_vesting_contract(
+    env: Env,
+    admin: Address,
+    vesting_address: Address,
+) -> Result<(), GovernanceError>
+```
+
+Set the vesting contract address (admin only). Once set, vote weight is computed
+from the beneficiary's vested balance at the proposal's `created_at` snapshot
+timestamp. Requires `admin.require_auth()`.
+
+```rust
+pub fn get_vesting_contract(env: Env) -> Option<Address>
+```
+
+Get the current vesting contract address, or `None` if not configured.
 
 ```rust
 pub fn get_voting_weight(env: Env, address: Address) -> i128
 ```
 
-Get total voting weight (own weight + delegated weight if delegate).
+Get total voting weight (own weight + delegated weight if delegate). When a
+vesting contract is configured, own weight is the beneficiary's vested balance
+at the current ledger timestamp.
 
 ### Delegation
 
@@ -247,6 +319,8 @@ Cast a vote on a proposal.
 - Must have voting weight > 0
 - Proposal must not be expired or executed
 - For quadratic: credits must be > 0 and ≤ voting weight
+- Vesting contract must be set (fails closed with `VestingNotConfigured` if not)
+- Weight is computed from the vesting contract at the snapshot timestamp (`proposal.created_at`)
 
 ```rust
 pub fn get_vote_record(
@@ -340,10 +414,17 @@ cargo test --package kora-governance-voting --lib
 
 1. **Authorization**: All state-changing functions require `require_auth()`
 2. **Overflow protection**: Checked arithmetic throughout
-3. **Reentrancy**: Not applicable (no cross-contract calls in vote path)
+3. **Reentrancy**: The vote path makes a read-only cross-contract call to the
+   vesting contract (`get_vested_balance_at`). The vesting contract is
+   non-reentrant and the governance path only reads, so reentrancy is not a
+   concern.
 4. **Delegation circularity**: Prevented at delegation time
 5. **Vote finality**: Cannot change vote once cast
-6. **Admin privileges**: Limited to weight management and execution
+6. **Admin privileges**: Limited to weight management, execution, and setting
+   the vesting contract address
+7. **Fallback on misconfiguration**: If the vesting contract address is not
+   set, `vote()` falls back to manually set weights (backward compatible).
+   Once set, only vested balances from the vesting contract are used.
 
 ## Integration Example
 
@@ -354,23 +435,32 @@ use kora_governance_voting::{
     VotingMode,
     VoteChoice,
 };
+use kora_vesting::{
+    VestingContractClient,
+};
 
-// Initialize
-let client = GovernanceVotingContractClient::new(&env, &contract_id);
-client.initialize(&admin, &access_control);
+// 1. Deploy & initialize vesting contract
+let vesting = VestingContractClient::new(&env, &vesting_addr);
+vesting.initialize(&admin, &token_address);
 
-// Set voting weights (in production, synced from staking contract)
-client.set_voting_weight(&admin, &alice, &1000);
-client.set_voting_weight(&admin, &bob, &500);
+// Create grant for alice: 10_000 tokens vesting over 1 year
+vesting.create_grant(&admin, &alice, &10_000, &now, &604800, &31536000);
 
-// Alice delegates to Bob
-client.delegate(&alice, &bob);
+// 2. Deploy & initialize governance voting
+let gov = GovernanceVotingContractClient::new(&env, &gov_contract_id);
+gov.initialize(&admin, &access_control);
 
-// Bob now has 1500 weight (500 own + 1000 delegated)
-let bob_weight = client.get_voting_weight(&bob); // 1500
+// 3. Wire vesting contract into governance for on-chain weight computation
+gov.set_vesting_contract(&admin, &vesting_addr);
 
-// Create a sentiment proposal with quadratic voting
-let proposal_id = client.create_proposal(
+// 4. Alice delegates to Bob (delegates her vested balance)
+gov.delegate(&alice, &bob);
+
+// 5. Bob's weight = his own vested balance + Alice's vested balance
+let bob_weight = gov.get_voting_weight(&bob); // computed from vesting contract
+
+// 6. Create a sentiment proposal with quadratic voting
+let proposal_id = gov.create_proposal(
     &proposer,
     &String::from_str(&env, "Protocol Direction"),
     &String::from_str(&env, "Should we..."),
@@ -380,11 +470,12 @@ let proposal_id = client.create_proposal(
     &0,   // default duration
 );
 
-// Bob votes with 49 voice credits → 7 votes (sqrt(49))
-client.vote(&bob, &proposal_id, &VoteChoice::For, &49);
+// 7. Bob votes with 49 voice credits → 7 votes (sqrt(49))
+//    Weight is the vested balance at proposal.created_at snapshot
+gov.vote(&bob, &proposal_id, &VoteChoice::For, &49);
 
-// Execute if quorum met
-client.execute_proposal(&admin, &proposal_id);
+// 8. Execute if quorum met
+gov.execute_proposal(&admin, &proposal_id);
 ```
 
 ## Future Enhancements

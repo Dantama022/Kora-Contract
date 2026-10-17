@@ -13,12 +13,14 @@ pub mod verification {
     }
 }
 
+use kora_parameter_registry::ParameterRegistryContractClient;
 use kora_shared::{
     errors::CommonError,
     events,
     types::{
         EarlySettlementOffer, InstallmentSchedule, Pool, Position,
-        PositionSaleOffer, PositionShare, ProtocolStats, RepaymentApproval, ShareSaleOffer,
+        PositionSaleOffer, PositionShare, ProtocolStats, RegistryParamKey,
+        RepaymentApproval, ShareSaleOffer,
     },
     validation::{bps_of, bps_of_normalized, require_valid_bps_range, UPGRADE_TIMELOCK_DELAY},
 };
@@ -84,6 +86,8 @@ pub enum FinancingPoolError {
     ApprovalPending = 33,
     ApprovalThresholdNotMet = 34,
     GracePeriodActive = 35,
+    EscrowPending = 36,
+    EscrowAlreadyConfigured = 37,
 }
 
 impl From<CommonError> for FinancingPoolError {
@@ -103,6 +107,14 @@ impl From<CommonError> for FinancingPoolError {
 
 #[contracttype]
 pub enum DataKey {
+    SchemaVersion,
+    /// One-time configured dispute escrow; callbacks authenticate this contract.
+    DisputeEscrow,
+    /// Exact payment held outside pool accounting until escrow adjudication.
+    EscrowPending(u64),
+    /// Escrow repayments remain in custody until lump-sum completion. Prevent
+    /// mixing them with the legacy immediate-distribution repay_partial path.
+    EscrowCredited(u64),
     Pool(u64),
     Positions(u64),
     Admin,
@@ -128,12 +140,21 @@ pub enum DataKey {
     AggregateFunded(Address),
     /// Protocol-wide aggregate statistics (pools opened/repaid/defaulted/active).
     ProtocolStats,
+    /// Address of the parameter_registry contract for dynamic governance of
+    /// pool economics (caps, penalties, etc.). Set via `set_parameter_registry`.
+    ParameterRegistry,
     /// Installment repayment schedule for a pool, keyed by invoice ID.
     InstallmentSchedule(u64),
     /// Pending repayment approval for high-value invoices.
     RepaymentApproval(u64),
     /// Grace period in seconds before an invoice can be marked defaulted.
     GracePeriod,
+        /// The configured repayment escrow contract.
+        DisputeEscrow,
+        /// Open escrow reservation marker; repayment entry points reject these invoices.
+        EscrowPending(u64),
+        /// Amount reserved by the escrow for an invoice.
+        EscrowReservation(u64),
     /// PositionShare set for a pool, keyed by (invoice_id, original_investor).
     PositionShares(u64, Address),
     /// Next share index for a position (used for generating unique share IDs).
@@ -146,6 +167,10 @@ pub enum DataKey {
     Marketplace,
     /// Per-investor auto-compound preference, keyed by investor address (#578)
     AutoCompound(Address),
+    /// Dispute escrow contract address (#895)
+    DisputeEscrow,
+    EscrowPending(u64),
+    EscrowUsed(u64),
 }
 
 /// Investor preference to auto-compound a matured position's payout into a
@@ -166,6 +191,276 @@ pub struct FinancingPoolContract;
 
 #[contractimpl]
 impl FinancingPoolContract {
+    /// Configure the sole escrow callback authority once. Existing deployment
+    /// initialization stays compatible; governance must wire escrow before use.
+    pub fn set_dispute_escrow(
+        env: Env,
+        admin: Address,
+        escrow: Address,
+    ) -> Result<(), FinancingPoolError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        kora_shared::validation::require_not_self(&env, &escrow)?;
+        if env.storage().instance().has(&DataKey::DisputeEscrow) {
+            return Err(FinancingPoolError::AlreadyInitialized);
+        }
+        env.storage().instance().set(&DataKey::DisputeEscrow, &escrow);
+        Ok(())
+    }
+
+    /// Quote fresh lump-sum debt in pool-token base units. Schedules and
+    /// buyouts use separate accounting and cannot enter this escrow flow.
+    pub fn escrow_terms(
+        env: Env,
+        invoice_id: u64,
+    ) -> Result<(Address, Address, i128), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::RepaymentLock(invoice_id))
+        {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        let pool = Self::get_pool(env.clone(), invoice_id)?;
+        if pool.is_closed {
+            return Err(FinancingPoolError::PoolAlreadyClosed);
+        }
+        if pool.repaid_amount != 0
+            || pool.late_penalty_bps != 0
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::InstallmentSchedule(invoice_id))
+            || env
+                .storage()
+                .persistent()
+                .has(&DataKey::EarlySettlement(invoice_id))
+        {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        let remaining = pool
+            .total_owed
+            .checked_sub(pool.repaid_amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        if remaining <= 0 {
+            return Err(FinancingPoolError::RepaymentAlreadyMade);
+        }
+        // Escrow adjudication is separate from the high-value approval path.
+        if remaining >= REPAYMENT_APPROVAL_THRESHOLD {
+            return Err(FinancingPoolError::ApprovalThresholdNotMet);
+        }
+        let invoice = Self::load_invoice(&env, invoice_id)?;
+        if invoice.status != kora_shared::types::InvoiceStatus::Funded {
+            return Err(FinancingPoolError::PoolAlreadyClosed);
+        }
+        Self::require_escrow_invoice_unfrozen(&env, invoice_id)?;
+        // Escrow amounts are base units with no oracle conversion. Restrict
+        // this path to matching seven-decimal invoice and token currencies.
+        if token::Client::new(&env, &pool.token).decimals() != 7
+            || invoice.currency != Self::pool_token_currency(&env, &pool.token)?
+        {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        Ok((pool.token, invoice.sme, remaining))
+    }
+
+    pub fn has_position(env: Env, invoice_id: u64, investor: Address) -> bool {
+        let positions: Map<Address, Position> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Positions(invoice_id))
+            .unwrap_or_else(|| Map::new(&env));
+        positions
+            .get(investor)
+            .map(|position| position.contributed > 0)
+            .unwrap_or(false)
+    }
+
+    /// Reserve before escrow transfers tokens, preventing competing repayment
+    /// or position changes during the token interaction and adjudication.
+    pub fn reserve_escrow(
+        env: Env,
+        escrow: Address,
+        invoice_id: u64,
+        amount: i128,
+    ) -> Result<(), FinancingPoolError> {
+        Self::require_escrow(&env, &escrow)?;
+        Self::require_not_paused(&env)?;
+        let (_, _, remaining) = Self::escrow_terms(env.clone(), invoice_id)?;
+        if amount <= 0 || amount > MAX_AMOUNT || amount > remaining {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        let key = DataKey::EscrowPending(invoice_id);
+        env.storage().persistent().set(&key, &amount);
+        // Match the escrow record's retention window so the reservation cannot
+        // disappear while that record is still actionable.
+        env.storage().persistent().extend_ttl(&key, 518_400, 518_400);
+        Ok(())
+    }
+
+    /// Escrow has already transferred the reserved tokens to this pool (or
+    /// refunded its payer). Only pool-directed payments enter repayment stats.
+    /// Partial credits remain in pool custody until normal repay completes.
+    pub fn settle_escrow(
+        env: Env,
+        escrow: Address,
+        invoice_id: u64,
+        amount: i128,
+        pay_pool: bool,
+    ) -> Result<(), FinancingPoolError> {
+        Self::require_escrow(&env, &escrow)?;
+        let key = DataKey::EscrowPending(invoice_id);
+        let reserved: i128 = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(FinancingPoolError::EscrowNotFound)?;
+        if amount != reserved || amount <= 0 {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::RepaymentLock(invoice_id))
+        {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        if !pay_pool {
+            env.storage().persistent().remove(&key);
+            return Ok(());
+        }
+        let mut pool = Self::get_pool(env.clone(), invoice_id)?;
+        if pool.is_closed {
+            return Err(FinancingPoolError::PoolAlreadyClosed);
+        }
+        let invoice = Self::load_invoice(&env, invoice_id)?;
+        if invoice.status != kora_shared::types::InvoiceStatus::Funded {
+            return Err(FinancingPoolError::PoolAlreadyClosed);
+        }
+        Self::require_escrow_invoice_unfrozen(&env, invoice_id)?;
+        let new_repaid = pool
+            .repaid_amount
+            .checked_add(amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        if new_repaid > pool.total_owed {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        pool.repaid_amount = new_repaid;
+        pool.is_closed = new_repaid == pool.total_owed;
+        env.storage()
+            .persistent()
+            .set(&DataKey::RepaymentLock(invoice_id), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Pool(invoice_id), &pool);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowCredited(invoice_id), &true);
+        env.storage().persistent().extend_ttl(
+            &DataKey::EscrowCredited(invoice_id),
+            518_400,
+            518_400,
+        );
+        let mut stats = Self::get_protocol_stats(env.clone());
+        stats.total_repaid = stats
+            .total_repaid
+            .checked_add(amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        if pool.is_closed {
+            stats.active_pools = stats.active_pools.saturating_sub(1);
+        }
+        env.storage().instance().set(&DataKey::ProtocolStats, &stats);
+        events::repayment_made(&env, invoice_id, &escrow, amount);
+        if pool.is_closed {
+            Self::distribute_yield(&env, invoice_id, &pool.token, new_repaid, pool.face_value)?;
+            let nft: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::InvoiceNft)
+                .ok_or(FinancingPoolError::NotInitialized)?;
+            kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft)
+                .set_repaid(&env.current_contract_address(), &invoice_id);
+        }
+        env.storage().persistent().remove(&key);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::RepaymentLock(invoice_id));
+        Ok(())
+    }
+
+    fn require_escrow(env: &Env, escrow: &Address) -> Result<(), FinancingPoolError> {
+        escrow.require_auth();
+        let configured: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DisputeEscrow)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        if escrow != &configured {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        Ok(())
+    }
+
+    fn require_no_escrow(env: &Env, invoice_id: u64) -> Result<(), FinancingPoolError> {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::EscrowPending(invoice_id))
+        {
+            return Err(FinancingPoolError::EscrowPending);
+        }
+        Ok(())
+    }
+
+    fn require_no_escrow_credit(env: &Env, invoice_id: u64) -> Result<(), FinancingPoolError> {
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::EscrowCredited(invoice_id))
+        {
+            return Err(FinancingPoolError::PartialRepayInvalid);
+        }
+        Ok(())
+    }
+
+    fn require_escrow_invoice_unfrozen(
+        env: &Env,
+        invoice_id: u64,
+    ) -> Result<(), FinancingPoolError> {
+        let nft: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvoiceNft)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        if kora_invoice_nft::InvoiceNftContractClient::new(env, &nft)
+            .is_invoice_frozen(&invoice_id)
+        {
+            return Err(FinancingPoolError::InvoiceFrozen);
+        }
+        Ok(())
+    }
+
+    /// Convert token metadata to the protocol's currency-symbol representation.
+    fn pool_token_currency(env: &Env, asset: &Address) -> Result<Symbol, FinancingPoolError> {
+        let symbol = token::Client::new(env, asset).symbol();
+        let len = symbol.len() as usize;
+        if len == 0 || len > 32 {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        let mut bytes = [0u8; 32];
+        symbol.copy_into_slice(&mut bytes[..len]);
+        if !bytes[..len]
+            .iter()
+            .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
+        {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        let text =
+            core::str::from_utf8(&bytes[..len]).map_err(|_| FinancingPoolError::InvalidAmount)?;
+        Ok(Symbol::new(env, text))
+    }
+
     /// Explicit admin migration. Legacy deployments start at version zero.
     pub fn migrate_versions(
         env: Env, admin: Address, from_version: u32, to_version: u32,
@@ -183,6 +478,106 @@ impl FinancingPoolContract {
 
     pub fn schema_version(env: Env) -> u32 {
         kora_shared::migration::read_version(&env, &DataKey::SchemaVersion.into_val(&env))
+    }
+
+    pub fn set_dispute_escrow(env: Env, admin: Address, escrow: Address) -> Result<(), FinancingPoolError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        if escrow == env.current_contract_address() { return Err(FinancingPoolError::InvalidAddress); }
+        if env.storage().instance().has(&DataKey::DisputeEscrow) { return Err(FinancingPoolError::AlreadyInitialized); }
+        env.storage().instance().set(&DataKey::DisputeEscrow, &escrow);
+        Ok(())
+    }
+
+    /// Terms are fetched by escrow before collecting the SME's token payment.
+    pub fn escrow_terms(env: Env, invoice_id: u64) -> Result<(Address, Address, i128), FinancingPoolError> {
+        let pool: Pool = env.storage().persistent().get(&DataKey::Pool(invoice_id))
+            .ok_or(FinancingPoolError::PoolNotFound)?;
+        if pool.is_closed { return Err(FinancingPoolError::PoolAlreadyClosed); }
+        let nft: Address = env.storage().instance().get(&DataKey::InvoiceNft)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        let invoice = kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft).get_invoice(&invoice_id);
+        let remaining = pool.total_owed.checked_sub(pool.repaid_amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        Ok((pool.token, invoice.sme, remaining))
+    }
+
+    pub fn has_position(env: Env, invoice_id: u64, investor: Address) -> bool {
+        let positions: Map<Address, Position> = env.storage().persistent()
+            .get(&DataKey::Positions(invoice_id)).unwrap_or_else(|| Map::new(&env));
+        positions.get(investor).map(|p| p.contributed > 0).unwrap_or(false)
+    }
+
+    /// Escrow-only reservation: while pending, every normal repayment path is blocked.
+    pub fn reserve_escrow(env: Env, escrow: Address, invoice_id: u64, amount: i128) -> Result<(), FinancingPoolError> {
+        Self::require_escrow(&env, &escrow)?;
+        escrow.require_auth();
+        if amount <= 0 { return Err(FinancingPoolError::InvalidAmount); }
+        let key = DataKey::EscrowPending(invoice_id);
+        if env.storage().persistent().has(&key) { return Err(FinancingPoolError::EscrowPending); }
+        let used = DataKey::EscrowUsed(invoice_id);
+        if env.storage().persistent().has(&used) { return Err(FinancingPoolError::DisputeAlreadyOpen); }
+        let pool: Pool = env.storage().persistent().get(&DataKey::Pool(invoice_id))
+            .ok_or(FinancingPoolError::PoolNotFound)?;
+        if pool.is_closed { return Err(FinancingPoolError::PoolAlreadyClosed); }
+        let remaining = pool.total_owed.checked_sub(pool.repaid_amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        if amount > remaining { return Err(FinancingPoolError::InvalidAmount); }
+        env.storage().persistent().set(&key, &amount);
+        env.storage().persistent().extend_ttl(&key, 518_400, 518_400);
+        env.storage().persistent().set(&used, &true);
+        env.storage().persistent().extend_ttl(&used, 518_400, 518_400);
+        Ok(())
+    }
+
+    /// Escrow-only callback after its token transfer; an approved payment uses
+    /// the existing pool yield distribution and NFT completion path.
+    pub fn settle_escrow(
+        env: Env, escrow: Address, invoice_id: u64, amount: i128, pay_pool: bool,
+    ) -> Result<(), FinancingPoolError> {
+        Self::require_escrow(&env, &escrow)?;
+        escrow.require_auth();
+        let key = DataKey::EscrowPending(invoice_id);
+        let reserved: i128 = env.storage().persistent().get(&key).ok_or(FinancingPoolError::EscrowPending)?;
+        if reserved != amount { return Err(FinancingPoolError::InvalidAmount); }
+        if env.storage().persistent().has(&DataKey::RepaymentLock(invoice_id)) {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        env.storage().persistent().set(&DataKey::RepaymentLock(invoice_id), &true);
+        if pay_pool {
+            let mut pool: Pool = env.storage().persistent().get(&DataKey::Pool(invoice_id))
+                .ok_or(FinancingPoolError::PoolNotFound)?;
+            if pool.is_closed { return Err(FinancingPoolError::PoolAlreadyClosed); }
+            pool.repaid_amount = pool.repaid_amount.checked_add(amount)
+                .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+            if pool.repaid_amount > pool.total_owed { return Err(FinancingPoolError::InvalidAmount); }
+            let close = pool.repaid_amount >= pool.total_owed;
+            pool.is_closed = close;
+            env.storage().persistent().set(&DataKey::Pool(invoice_id), &pool);
+            let mut stats: ProtocolStats = env.storage().instance().get(&DataKey::ProtocolStats)
+                .unwrap_or(ProtocolStats { pools_opened: 0, total_repaid: 0, pools_defaulted: 0, active_pools: 0 });
+            stats.total_repaid = stats.total_repaid.saturating_add(amount);
+            if close { stats.active_pools = stats.active_pools.saturating_sub(1); }
+            env.storage().instance().set(&DataKey::ProtocolStats, &stats);
+            events::repayment_made(&env, invoice_id, &escrow, amount);
+            if close {
+                Self::distribute_yield(&env, invoice_id, &pool.token, pool.repaid_amount, pool.face_value)?;
+                let nft: Address = env.storage().instance().get(&DataKey::InvoiceNft)
+                    .ok_or(FinancingPoolError::NotInitialized)?;
+                kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft)
+                    .set_repaid(&env.current_contract_address(), &invoice_id);
+            }
+        }
+        env.storage().persistent().remove(&key);
+        env.storage().persistent().remove(&DataKey::RepaymentLock(invoice_id));
+        Ok(())
+    }
+
+    fn require_escrow(env: &Env, caller: &Address) -> Result<(), FinancingPoolError> {
+        let configured: Address = env.storage().instance().get(&DataKey::DisputeEscrow)
+            .ok_or(FinancingPoolError::EscrowNotConfigured)?;
+        if &configured != caller { return Err(FinancingPoolError::Unauthorized); }
+        Ok(())
     }
 
     /// One-time initialization. Wires up all cross-contract dependencies and configures pool parameters.
@@ -298,11 +693,7 @@ impl FinancingPoolContract {
             return Err(FinancingPoolError::InvalidAmount);
         }
 
-        let late_penalty_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::LatePenaltyBps)
-            .ok_or(FinancingPoolError::NotInitialized)?;
+        let late_penalty_bps: u32 = Self::get_late_penalty_bps(&env);
 
         let pool = Pool {
             invoice_id,
@@ -334,6 +725,19 @@ impl FinancingPoolContract {
         Ok(())
     }
 
+    /// Permissionlessly extend the TTL of an invoice's pool and positions entries.
+    /// Missing entries are ignored so this can be called before a pool is opened.
+    pub fn bump_pool_ttl(env: Env, invoice_id: u64) -> u32 {
+        let mut bumped = 0;
+        for key in [DataKey::Pool(invoice_id), DataKey::Positions(invoice_id)] {
+            if env.storage().persistent().has(&key) {
+                Self::bump_persistent(&env, &key);
+                bumped += 1;
+            }
+        }
+        bumped
+    }
+
     /// Update the per-investor concentration cap. Admin only.
     ///
     /// **Parameters:**
@@ -356,6 +760,44 @@ impl FinancingPoolContract {
         }
         env.storage().instance().set(&DataKey::MaxPositionBps, &max_position_bps);
         Ok(())
+    }
+
+    /// Wire the `parameter_registry` contract address so pool economics
+    /// (`LatePenaltyBps`, `MaxPositionBps`) are read from governance-tunable
+    /// registry keys instead of the static constructor values.
+    ///
+    /// Until this pointer is set (or when a registry key is absent), the
+    /// constructor values stored at initialisation act as bootstrap defaults.
+    ///
+    /// **Parameters:**
+    /// - `admin` — Must be the contract admin (requires auth).
+    /// - `registry` — The address of the deployed `parameter_registry` contract.
+    ///
+    /// **Errors:**
+    /// - `FinancingPoolError::NotAdmin` — Caller is not the admin.
+    /// - `FinancingPoolError::InvalidAddress` — `registry` is the contract's own address.
+    ///
+    /// **Security:** Admin-only.
+    pub fn set_parameter_registry(
+        env: Env,
+        admin: Address,
+        registry: Address,
+    ) -> Result<(), FinancingPoolError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        kora_shared::validation::require_not_self(&env, &registry)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::ParameterRegistry, &registry);
+        Ok(())
+    }
+
+    /// Returns the configured `parameter_registry` contract address, or `None`
+    /// if the pool has not been wired to a registry yet.
+    ///
+    /// **Security:** Read-only view. No authorization required.
+    pub fn get_parameter_registry(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::ParameterRegistry)
     }
 
     /// Updates the percentage of late-penalty payments routed to the treasury.
@@ -424,6 +866,199 @@ impl FinancingPoolContract {
         Self::require_admin(&env, &admin)?;
         kora_shared::validation::require_not_self(&env, &marketplace)?;
         env.storage().instance().set(&DataKey::Marketplace, &marketplace);
+        Ok(())
+    }
+
+    /// Configure the single repayment escrow allowed to reserve pool invoices.
+    pub fn set_dispute_escrow(
+        env: Env,
+        admin: Address,
+        escrow: Address,
+    ) -> Result<(), FinancingPoolError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        if env.storage().instance().has(&DataKey::DisputeEscrow) {
+            return Err(FinancingPoolError::EscrowAlreadyConfigured);
+        }
+        kora_shared::validation::require_not_self(&env, &escrow)?;
+        env.storage().instance().set(&DataKey::DisputeEscrow, &escrow);
+        Ok(())
+    }
+
+    /// Return the pool token, invoice SME, and remaining debt to the escrow.
+    pub fn escrow_terms(
+        env: Env,
+        invoice_id: u64,
+    ) -> Result<(Address, Address, i128), FinancingPoolError> {
+        let pool: Pool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Pool(invoice_id))
+            .ok_or(FinancingPoolError::PoolNotFound)?;
+        if pool.is_closed {
+            return Err(FinancingPoolError::PoolAlreadyClosed);
+        }
+        let nft: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvoiceNft)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        let invoice = kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft)
+            .get_invoice(&invoice_id);
+        let remaining = pool
+            .total_owed
+            .checked_sub(pool.repaid_amount)
+            .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+        Ok((pool.token, invoice.sme, remaining.max(0)))
+    }
+
+    /// Whether an address has a recorded investor position in this invoice.
+    pub fn has_position(env: Env, invoice_id: u64, investor: Address) -> bool {
+        let positions: Map<Address, Position> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Positions(invoice_id))
+            .unwrap_or_else(|| Map::new(&env));
+        positions.contains_key(investor)
+    }
+
+    /// Reserve an open invoice while its payment is held by the escrow.
+    pub fn reserve_escrow(
+        env: Env,
+        escrow: Address,
+        invoice_id: u64,
+        amount: i128,
+    ) -> Result<(), FinancingPoolError> {
+        escrow.require_auth();
+        let configured: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DisputeEscrow)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        if escrow != configured {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        if amount <= 0 {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        if env.storage().persistent().has(&DataKey::EscrowPending(invoice_id)) {
+            return Err(FinancingPoolError::EscrowPending);
+        }
+        if env
+            .storage()
+            .persistent()
+            .has(&DataKey::RepaymentLock(invoice_id))
+        {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        let (_, _, remaining) = Self::escrow_terms(env.clone(), invoice_id)?;
+        if amount > remaining {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowPending(invoice_id), &true);
+        env.storage()
+            .persistent()
+            .set(&DataKey::EscrowReservation(invoice_id), &amount);
+        Self::bump_persistent(&env, &DataKey::EscrowPending(invoice_id));
+        Self::bump_persistent(&env, &DataKey::EscrowReservation(invoice_id));
+        Ok(())
+    }
+
+    /// Apply or release an escrow reservation after its adjudication.
+    pub fn settle_escrow(
+        env: Env,
+        escrow: Address,
+        invoice_id: u64,
+        amount: i128,
+        to_pool: bool,
+    ) -> Result<(), FinancingPoolError> {
+        escrow.require_auth();
+        let configured: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DisputeEscrow)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        if escrow != configured {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+        if !env.storage().persistent().has(&DataKey::EscrowPending(invoice_id)) {
+            return Err(FinancingPoolError::EscrowPending);
+        }
+        let reserved: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::EscrowReservation(invoice_id))
+            .ok_or(FinancingPoolError::EscrowPending)?;
+        if reserved != amount {
+            return Err(FinancingPoolError::InvalidAmount);
+        }
+
+        if to_pool {
+            let mut pool: Pool = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Pool(invoice_id))
+                .ok_or(FinancingPoolError::PoolNotFound)?;
+            if pool.is_closed {
+                return Err(FinancingPoolError::PoolAlreadyClosed);
+            }
+            pool.repaid_amount = pool
+                .repaid_amount
+                .checked_add(amount)
+                .ok_or(FinancingPoolError::ArithmeticOverflow)?;
+            if pool.repaid_amount > pool.total_owed {
+                return Err(FinancingPoolError::InvalidAmount);
+            }
+            let should_close = pool.repaid_amount >= pool.total_owed;
+            pool.is_closed = should_close;
+            env.storage()
+                .persistent()
+                .set(&DataKey::Pool(invoice_id), &pool);
+
+            let mut stats: ProtocolStats = env
+                .storage()
+                .instance()
+                .get(&DataKey::ProtocolStats)
+                .unwrap_or(ProtocolStats {
+                    pools_opened: 0,
+                    total_repaid: 0,
+                    pools_defaulted: 0,
+                    active_pools: 0,
+                });
+            stats.total_repaid = stats.total_repaid.saturating_add(amount);
+            if should_close {
+                stats.active_pools = stats.active_pools.saturating_sub(1);
+            }
+            env.storage().instance().set(&DataKey::ProtocolStats, &stats);
+
+            let nft: Address = env
+                .storage()
+                .instance()
+                .get(&DataKey::InvoiceNft)
+                .ok_or(FinancingPoolError::NotInitialized)?;
+            let nft_client = kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft);
+            let invoice = nft_client.get_invoice(&invoice_id);
+            events::repayment_made(&env, invoice_id, &invoice.sme, amount);
+            Self::distribute_yield(
+                &env,
+                invoice_id,
+                &pool.token,
+                pool.repaid_amount,
+                pool.face_value,
+            )?;
+            if should_close {
+                nft_client.set_repaid(&env.current_contract_address(), &invoice_id);
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::EscrowPending(invoice_id));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::EscrowReservation(invoice_id));
         Ok(())
     }
 
@@ -501,9 +1136,21 @@ impl FinancingPoolContract {
         contributed: i128,
         total_pool: i128,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow_credit(&env, invoice_id)?;
+        Self::require_no_escrow(&env, invoice_id)?;
         caller.require_auth();
         Self::require_admin(&env, &caller)?;
         Self::require_not_paused(&env)?;
+
+        let nft_contract: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvoiceNft)
+            .ok_or(FinancingPoolError::NotInitialized)?;
+        let nft_client = kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft_contract);
+        if nft_client.is_invoice_frozen(&invoice_id) {
+            return Err(FinancingPoolError::InvoiceFrozen);
+        }
 
         if contributed <= 0 || total_pool <= 0 {
             return Err(FinancingPoolError::InvalidAmount);
@@ -518,12 +1165,10 @@ impl FinancingPoolContract {
             .and_then(|v| v.checked_div(total_pool))
             .ok_or(FinancingPoolError::ArithmeticOverflow)? as u32;
 
-        // Enforce per-investor concentration cap
-        let max_position_bps: u32 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MaxPositionBps)
-            .unwrap_or(5_000);
+        // Enforce per-investor concentration cap (registry-tunable, falls back
+        // to the constructor-stored default when the registry is not wired or
+        // the key is absent).
+        let max_position_bps: u32 = Self::get_max_position_bps(&env);
         if share_bps > max_position_bps {
             return Err(FinancingPoolError::ExceedsFundingTarget);
         }
@@ -613,6 +1258,7 @@ impl FinancingPoolContract {
         invoice_id: u64,
         amount: i128,
     ) -> Result<u32, FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         caller.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -701,6 +1347,7 @@ impl FinancingPoolContract {
         share_index: u32,
         new_owner: Address,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         caller.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -752,6 +1399,7 @@ impl FinancingPoolContract {
         token: Address,
         price: i128,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         seller.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -780,6 +1428,16 @@ impl FinancingPoolContract {
 
         if share.owner != seller {
             return Err(FinancingPoolError::NotPositionOwner);
+        }
+
+        if env.storage().persistent().has(&DataKey::RepaymentLock(invoice_id)) {
+            return Err(FinancingPoolError::Unauthorized);
+        }
+
+        if let Some(offer) = env.storage().persistent().get::<DataKey, EarlySettlementOffer>(&DataKey::EarlySettlement(invoice_id)) {
+            if offer.accepted.iter().any(|a| a == seller) {
+                return Err(FinancingPoolError::Unauthorized);
+            }
         }
 
         if env.storage().persistent().has(&DataKey::ShareSaleOffer(invoice_id, original_investor.clone(), share_index)) {
@@ -814,8 +1472,13 @@ impl FinancingPoolContract {
         original_investor: Address,
         share_index: u32,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         buyer.require_auth();
         Self::require_not_paused(&env)?;
+
+        if env.storage().persistent().has(&DataKey::RepaymentLock(invoice_id)) {
+            return Err(FinancingPoolError::Unauthorized);
+        }
 
         let offer: ShareSaleOffer = env
             .storage()
@@ -890,6 +1553,12 @@ impl FinancingPoolContract {
         amount: i128,
     ) -> Result<(), FinancingPoolError> {
         payer.require_auth();
+
+        // Escrow credits use the normal lump-sum custody model; this legacy
+        // entrypoint distributes immediately and cannot safely mix with them.
+        if env.storage().persistent().has(&DataKey::EscrowCredited(invoice_id)) {
+            return Err(FinancingPoolError::PartialRepayInvalid);
+        }
 
         if env.storage().persistent().has(&DataKey::EscrowPending(invoice_id)) {
             return Err(FinancingPoolError::EscrowPending);
@@ -1072,9 +1741,10 @@ impl FinancingPoolContract {
             }
 
             // Apply late penalty if this installment is past its due_date.
-            if !pool.penalty_applied && pool.late_penalty_bps > 0 {
+            let penalty_bps = Self::get_late_penalty_bps(env);
+            if !pool.penalty_applied && penalty_bps > 0 {
                 if env.ledger().timestamp() > installment.due_date {
-                    let penalty = bps_of(pool.face_value, pool.late_penalty_bps)?;
+                    let penalty = bps_of(pool.face_value, penalty_bps)?;
 
                     // Split the penalty: a configurable portion goes to the
                     // treasury, the remainder is added to total_owed for investors.
@@ -1119,9 +1789,13 @@ impl FinancingPoolContract {
             events::installment_paid(&env, invoice_id, &payer, idx, effective_amount);
         } else {
             // No schedule — lump-sum late penalty logic.
-            if !pool.penalty_applied && pool.late_penalty_bps > 0 {
+            // The registry value is read here (not from the pool snapshot) so
+            // governance can tune penalty rates for existing pools; the pool's
+            // stored value is the pre-registry bootstrap default.
+            let penalty_bps = Self::get_late_penalty_bps(env);
+            if !pool.penalty_applied && penalty_bps > 0 {
                 if env.ledger().timestamp() > invoice.due_date {
-                    let penalty = bps_of(pool.face_value, pool.late_penalty_bps)?;
+                    let penalty = bps_of(pool.face_value, penalty_bps)?;
 
                     // Split the penalty: a configurable portion goes to the
                     // treasury, the remainder is added to total_owed for investors.
@@ -1282,6 +1956,7 @@ impl FinancingPoolContract {
         for i in 0..n {
             let invoice_id = invoice_ids.get(i).unwrap();
 
+            Self::require_no_escrow_credit(&env, invoice_id)?;
             if env.storage().persistent().has(&DataKey::EscrowPending(invoice_id)) {
                 return Err(FinancingPoolError::EscrowPending);
             }
@@ -1605,7 +2280,7 @@ impl FinancingPoolContract {
             return Err(FinancingPoolError::Unauthorized);
         }
 
-        let pool: Pool = env
+        let mut pool: Pool = env
             .storage()
             .persistent()
             .get(&DataKey::Pool(invoice_id))
@@ -1651,6 +2326,13 @@ impl FinancingPoolContract {
             }
         }
 
+        // Escrow credits have never been distributed. Close before external
+        // calls so a default cannot distribute their held balance twice.
+        if env.storage().persistent().has(&DataKey::EscrowCredited(invoice_id)) {
+            pool.is_closed = true;
+            env.storage().persistent().set(&DataKey::Pool(invoice_id), &pool);
+        }
+
         if pool.repaid_amount > 0 {
             Self::distribute_yield(&env, invoice_id, &token, pool.repaid_amount, pool.face_value)?;
         }
@@ -1689,9 +2371,6 @@ impl FinancingPoolContract {
     }
 
     // ── Multi-Signature Repayment Approval (#580) ──────────────────────────────
-
-    /// Threshold above which a repayment requires N-of-M approvals before execution.
-    const REPAYMENT_APPROVAL_THRESHOLD: i128 = 10_000_000_000i128;
 
     /// Propose a high-value repayment for approval. Any address may propose; the
     /// proposal is recorded on-chain for designated approvers to co-sign.
@@ -1889,6 +2568,8 @@ impl FinancingPoolContract {
         invoice_id: u64,
         amount: i128,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow_credit(&env, invoice_id)?;
+        Self::require_no_escrow(&env, invoice_id)?;
         sme.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -1960,8 +2641,13 @@ impl FinancingPoolContract {
         investor: Address,
         invoice_id: u64,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         investor.require_auth();
         Self::require_not_paused(&env)?;
+
+        if env.storage().persistent().has(&DataKey::EscrowPending(invoice_id)) {
+            return Err(FinancingPoolError::EscrowPending);
+        }
 
         if env
             .storage()
@@ -2078,6 +2764,7 @@ impl FinancingPoolContract {
         sme: Address,
         invoice_id: u64,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         sme.require_auth();
 
         let offer: EarlySettlementOffer = env
@@ -2191,6 +2878,8 @@ impl FinancingPoolContract {
         invoice_id: u64,
         schedule: InstallmentSchedule,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow_credit(&env, invoice_id)?;
+        Self::require_no_escrow(&env, invoice_id)?;
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
         Self::require_not_paused(&env)?;
@@ -2279,6 +2968,7 @@ impl FinancingPoolContract {
         token: Address,
         price: i128,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         seller.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -2382,6 +3072,7 @@ impl FinancingPoolContract {
         invoice_id: u64,
         seller: Address,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         buyer.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -2553,6 +3244,53 @@ impl FinancingPoolContract {
         Ok(())
     }
 
+    /// Read `LatePenaltyBps` from the `parameter_registry` when wired, falling
+    /// back to the constructor-stored default (bootstrap value) when the
+    /// registry is absent, the key is missing, or the read fails.
+    fn get_late_penalty_bps(env: &Env) -> u32 {
+        Self::get_registry_bps(env, RegistryParamKey::LatePenaltyBps)
+            .unwrap_or_else(|| {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::LatePenaltyBps)
+                    .unwrap_or(500)
+            })
+    }
+
+    /// Read `MaxPositionBps` from the `parameter_registry` when wired, falling
+    /// back to the constructor-stored default (bootstrap value) when the
+    /// registry is absent, the key is missing, or the read fails.
+    fn get_max_position_bps(env: &Env) -> u32 {
+        Self::get_registry_bps(env, RegistryParamKey::MaxPositionBps)
+            .unwrap_or_else(|| {
+                env.storage()
+                    .instance()
+                    .get(&DataKey::MaxPositionBps)
+                    .unwrap_or(5_000)
+            })
+    }
+
+    /// Shared registry read for bps-valued parameters.  Returns `None` — so the
+    /// caller falls back to the local bootstrap default — when the registry is
+    /// not wired, the key is absent, the read fails, or the returned value is
+    /// out of the valid bps range [0, 10 000].
+    fn get_registry_bps(env: &Env, key: RegistryParamKey) -> Option<u32> {
+        let registry_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ParameterRegistry)?;
+        let client = ParameterRegistryContractClient::new(env, &registry_addr);
+        // try_* keeps the call non-fatal: a misconfigured or upgraded registry
+        // makes the pool fall back to bootstrap defaults instead of reverting.
+        let param = client.try_get_parameter(&key).ok().flatten()?;
+        let value = u32::try_from(param.value).ok()?;
+        if value <= 10_000 {
+            Some(value)
+        } else {
+            None
+        }
+    }
+
     /// Convert `amount` between currencies using the price oracle.
     /// If invoice currency matches the pool token's symbol, returns amount unchanged.
     /// Rejects stale or missing oracle prices.
@@ -2560,7 +3298,7 @@ impl FinancingPoolContract {
         env: &Env,
         amount: i128,
         invoice_currency: &Symbol,
-        _pool_token: &Address,
+        pool_token: &Address,
     ) -> Result<i128, FinancingPoolError> {
         let oracle_addr: Option<Address> = env
             .storage()
@@ -2585,6 +3323,15 @@ impl FinancingPoolContract {
         // they never handle cross-currency invoices.
         if invoice_currency == &pool_currency {
             return Ok(amount);
+        }
+
+        // A partial escrow credit and its normal repayment completion must use
+        // the same base units. Honor real token metadata for matching currencies
+        // before the legacy cross-currency USDC oracle fallback below.
+        if let Ok(actual_currency) = Self::pool_token_currency(env, pool_token) {
+            if invoice_currency == &actual_currency {
+                return Ok(amount);
+            }
         }
 
         let oracle_client =
@@ -2646,6 +3393,7 @@ impl FinancingPoolContract {
         from: Address,
         to: Address,
     ) -> Result<(), FinancingPoolError> {
+        Self::require_no_escrow(&env, invoice_id)?;
         from.require_auth();
         Self::require_not_paused(&env)?;
 
@@ -2980,6 +3728,37 @@ mod tests {
         let (env, _admin, _nft, _treasury, _ac, client) = setup();
         let investor = Address::generate(&env);
         let non_admin = Address::generate(&env);
+    #[test]
+    fn test_bump_pool_ttl_extends_existing_pool_and_positions() {
+        let (env, _admin, _nft, _treasury, _ac, client) = setup();
+        let invoice_id = 42u64;
+        let contract_id = client.address.clone();
+        seed_pool(&env, &contract_id, invoice_id, 1_000);
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Positions(invoice_id), &soroban_sdk::Map::<Address, Position>::new(&env));
+        });
+
+        let pool_ttl_before = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Pool(invoice_id))
+        });
+        let positions_ttl_before = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Positions(invoice_id))
+        });
+
+        assert_eq!(client.bump_pool_ttl(&invoice_id), 2);
+
+        let pool_ttl_after = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Pool(invoice_id))
+        });
+        let positions_ttl_after = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Positions(invoice_id))
+        });
+        assert!(pool_ttl_after > pool_ttl_before);
+        assert!(positions_ttl_after > positions_ttl_before);
+        assert_eq!(client.bump_pool_ttl(&999u64), 0);
+    }
         let result = client.try_record_position(
             &non_admin,
             &1u64,
@@ -3052,6 +3831,47 @@ mod tests {
         assert!(client
             .try_record_position(&admin, &1u64, &investor, &100i128, &0i128)
             .is_err());
+    }
+
+    #[test]
+    fn test_record_position_blocked_when_invoice_frozen() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, FinancingPoolContract);
+        let client = FinancingPoolContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let nft = env.register_contract(None, kora_invoice_nft::InvoiceNftContract);
+        let nft_client = kora_invoice_nft::InvoiceNftContractClient::new(&env, &nft);
+        nft_client.initialize(&admin);
+
+        let rr = Address::generate(&env);
+        let treasury = Address::generate(&env);
+        let ac = env.register_contract(None, kora_access_control::AccessControlContract);
+        let ac_client = kora_access_control::AccessControlContractClient::new(&env, &ac);
+        ac_client.initialize(&admin);
+        let oracle = Address::generate(&env);
+        let dispute_resolution = Address::generate(&env);
+
+        client.initialize(
+            &admin,
+            &nft,
+            &rr,
+            &treasury,
+            &ac,
+            &200u32,
+            &oracle,
+            &10_000u32,
+            &0u64,
+            &dispute_resolution,
+        );
+
+        let sme = Address::generate(&env);
+        let invoice_id = nft_client.mint_invoice(&sme, &10_000_000_000i128, &oracle, &1_000_000u64, &oracle);
+        nft_client.freeze_invoice(&admin, &invoice_id);
+
+        let investor = Address::generate(&env);
+        let result = client.try_record_position(&admin, &invoice_id, &investor, &5_000_000_000i128, &10_000_000_000i128);
+        assert_eq!(result.unwrap_err().unwrap(), FinancingPoolError::InvoiceFrozen);
     }
 
     #[test]

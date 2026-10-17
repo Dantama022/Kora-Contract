@@ -53,6 +53,9 @@
 /// Covers all realistic tiered allocations (max_position_bps >= 1250 bps → max 8).
 pub const MAX_INVESTORS: usize = 8;
 
+/// Maximum number of positions per pool in the main contract, mirrored here for consistency.
+pub const MAX_POSITIONS_PER_POOL: usize = 100;
+
 /// Fixed token decimals (USDC/EURC on Stellar).
 pub const TOKEN_DECIMALS: u32 = 7;
 

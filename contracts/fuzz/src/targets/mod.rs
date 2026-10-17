@@ -18,6 +18,7 @@ pub mod marketplace;
 pub mod marketplace_fee;
 pub mod price_oracle;
 pub mod risk_registry;
+pub mod secondary_market;
 pub mod treasury;
 
 /// Decode up to [`crate::MAX_OPS`] operations from `data` and apply each with

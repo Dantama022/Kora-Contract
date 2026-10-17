@@ -16,9 +16,9 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Bytes, B
 // ~30 days in ledgers at ~5 s/ledger
 const PERSISTENT_TTL_THRESHOLD: u32 = 518_400;
 const PERSISTENT_TTL_BUMP: u32 = 518_400;
+const LISTING_TTL_BUMP: u32 = 1_036_800;
 
-/// Maximum number of allocations accepted by `fund_invoices_batch` in a single
-/// call, to keep per-transaction CPU/resource usage within Soroban limits. (#448)
+/// Maximum number of items accepted by marketplace batch entrypoints in one call.
 const MAX_BATCH_SIZE: u32 = 20;
 
 /// Default minimum contribution floor for `fund_invoice`, in a token's smallest unit.
@@ -1433,6 +1433,35 @@ impl MarketplaceContract {
             .ok_or(KoraError::ListingNotFound)
     }
 
+    /// Permissionlessly extend a listing's TTL and any linked financing-pool entries.
+    pub fn bump_listing_ttl(env: Env, invoice_id: u64) -> Result<(), KoraError> {
+        env.storage()
+            .persistent()
+            .get::<DataKey, Listing>(&DataKey::Listing(invoice_id))
+            .ok_or(KoraError::ListingNotFound)?;
+        Self::bump_listing(&env, invoice_id);
+
+        let config = Self::load_config(&env)?;
+        let pool_client =
+            kora_financing_pool::FinancingPoolContractClient::new(&env, &config.financing_pool);
+        pool_client.bump_pool_ttl(&invoice_id);
+        Ok(())
+    }
+
+    /// Permissionlessly extend listing and linked pool TTLs for a bounded batch.
+    pub fn bump_listings_batch(env: Env, invoice_ids: Vec<u64>) -> Result<u32, KoraError> {
+        if invoice_ids.is_empty() || invoice_ids.len() > MAX_BATCH_SIZE {
+            return Err(KoraError::InvalidAmount);
+        }
+
+        let mut bumped = 0;
+        for invoice_id in invoice_ids.iter() {
+            Self::bump_listing_ttl(env.clone(), invoice_id)?;
+            bumped += 1;
+        }
+        Ok(bumped)
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn require_compliance_attested(env: &Env, sme: &Address) -> Result<(), KoraError> {
@@ -2794,6 +2823,37 @@ mod tests {
         let result = t.mp.try_get_listing(&999u64);
         assert_eq!(result.unwrap_err().unwrap(), KoraError::ListingNotFound);
     }
+    #[test]
+    fn test_permissionless_bump_listing_ttl_calls_linked_pool() {
+        let t = deploy();
+        let id = list_one(&t);
+        let pool = kora_shared::types::Pool {
+            invoice_id: id,
+            token: t.token.clone(),
+            total_funded: 0,
+            face_value: 10_000_000_000,
+            repaid_amount: 0,
+            is_closed: false,
+            late_penalty_bps: 200,
+            total_owed: 10_000_000_000,
+            penalty_applied: false,
+        };
+        t.env.as_contract(&t.pool, || {
+            t.env
+                .storage()
+                .persistent()
+                .set(&kora_financing_pool::DataKey::Pool(id), &pool);
+        });
+
+        assert_eq!(t.mp.bump_listing_ttl(&id), Ok(()));
+        let mut ids = Vec::new(&t.env);
+        ids.push_back(id);
+        assert_eq!(t.mp.bump_listings_batch(&ids), Ok(1));
+        assert_eq!(
+            t.mp.try_bump_listing_ttl(&999u64).unwrap_err().unwrap(),
+            KoraError::ListingNotFound
+        );
+    }
 
     #[test]
     fn test_get_listing_returns_correct_data() {
@@ -2815,6 +2875,16 @@ mod tests {
         assert_eq!(listing.token, t.token);
         assert!(listing.is_active);
         assert_eq!(listing.funded_amount, 0);
+    }
+
+    #[test]
+    fn test_bump_listing_ttl_is_permissionless() {
+        let t = deploy();
+        let id = list_one(&t);
+
+        t.mp.bump_listing_ttl(&id);
+
+        assert!(t.mp.get_listing(&id).is_active);
     }
 
     // ── fund_invoice (error-path tests that don't require token contracts) ────

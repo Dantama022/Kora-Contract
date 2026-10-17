@@ -15,6 +15,7 @@ kora-access-control = { path = "../access_control" }
 kora-price-oracle = { path = "../price_oracle" }
 kora-treasury = { path = "../treasury" }
 kora-dispute-resolution = { path = "../dispute_resolution" }
+kora-parameter-registry = { path = "../parameter_registry" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
@@ -24,6 +25,7 @@ kora-risk-registry = { path = "../risk_registry" }
 kora-access-control = { path = "../access_control" }
 kora-price-oracle = { path = "../price_oracle" }
 kora-dispute-resolution = { path = "../dispute_resolution" }
+kora-parameter-registry = { path = "../parameter_registry" }
 proptest = "1.4"
 
 # ── Formal model integration test ─────────────────────────────────────────────

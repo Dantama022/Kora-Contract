@@ -571,6 +571,8 @@ pub enum RegistryParamKey {
     TreasuryFeeBps,
     /// Insurance reserve allocation from each fee collection (bps).
     ReserveAllocationBps,
+    /// Minimum treasury balance to retain after a grant release (bps of pre-release balance).
+    MinReserveRatioBps,
 }
 
 /// A single governed parameter value.

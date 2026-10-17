@@ -1,5 +1,6 @@
 #![no_std]
 
+use kora_shared::reentrancy::ReentrancyGuard;
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, token, Address, Env, IntoVal, Symbol,
 };
@@ -22,6 +23,7 @@ pub enum EscrowError {
     Resolved = 7,
     TimeoutNotReached = 8,
     TimeoutExpired = 9,
+    Reentrancy = 10,
 }
 
 #[contracttype]
@@ -76,6 +78,9 @@ impl DisputeEscrowContract {
         invoice_id: u64,
         amount: i128,
     ) -> Result<(), EscrowError> {
+        // AUDIT FIX (#914): protect every custody mutation before pool/token
+        // interactions, including callbacks targeting a different invoice.
+        let _guard = ReentrancyGuard::new(&env).map_err(|_| EscrowError::Reentrancy)?;
         challenger.require_auth();
         payer.require_auth();
         if amount <= 0 {
@@ -145,6 +150,7 @@ impl DisputeEscrowContract {
         invoice_id: u64,
         pay_pool: bool,
     ) -> Result<(), EscrowError> {
+        let _guard = ReentrancyGuard::new(&env).map_err(|_| EscrowError::Reentrancy)?;
         resolver.require_auth();
         let admin: Address = env
             .storage()
@@ -164,6 +170,7 @@ impl DisputeEscrowContract {
     /// Permissionless default after timeout: return funds to the SME payer.
     /// The one-dispute-per-invoice rule prevents reopening to extend a deadline.
     pub fn resolve_timeout(env: Env, invoice_id: u64) -> Result<(), EscrowError> {
+        let _guard = ReentrancyGuard::new(&env).map_err(|_| EscrowError::Reentrancy)?;
         let dispute = Self::load_open(&env, invoice_id)?;
         if env.ledger().timestamp() < dispute.opened_at.saturating_add(DISPUTE_TIMEOUT) {
             return Err(EscrowError::TimeoutNotReached);

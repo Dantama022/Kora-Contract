@@ -24,7 +24,8 @@ export class Scheduler {
   constructor(
     private readonly store: JobStore,
     private readonly dispatcher: Dispatcher,
-    private readonly config: KeeperConfig
+    private readonly config: KeeperConfig,
+    private readonly scanListingTtl?: () => Promise<Deadline[]>
   ) {}
 
   /**
@@ -70,6 +71,15 @@ export class Scheduler {
   // ---------------------------------------------------------------------------
 
   private async _tick(): Promise<void> {
+    if (this.scanListingTtl) {
+      try {
+        const ttlJobs = await this.scanListingTtl();
+        this.enqueueDeadlines(ttlJobs);
+      } catch (error) {
+        logger.error({ error }, "Listing TTL scan failed; existing jobs will continue");
+      }
+    }
+
     const nowTs = Math.floor(Date.now() / 1000);
 
     // Step 1: promote pending jobs whose deadline has elapsed

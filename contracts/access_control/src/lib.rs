@@ -72,6 +72,8 @@ pub enum AccessControlError {
     RotationElectionNotFound = 40,
     /// Council rotation election already concluded.
     RotationElectionAlreadyConcluded = 41,
+    /// Admin key rotation is prohibited while the protocol is emergency-paused.
+    AdminRotationWhilePaused = 42,
 }
 
 impl From<CommonError> for AccessControlError {
@@ -128,6 +130,8 @@ pub enum DataKey {
     NextProposalId,
     /// A pending multisig action proposal, keyed by proposal id.
     Proposal(u64),
+    /// The currently active admin-key rotation proposal, if any.
+    PendingAdminRotation,
     /// A pending protocol-parameter governance proposal, keyed by id.
     ParameterProposal(u64),
     /// Monotonic counter for the next parameter-proposal id.
@@ -713,6 +717,10 @@ impl AccessControlContract {
             .get(&DataKey::NextProposalId)
             .unwrap_or(1);
 
+        if matches!(&action, AdminAction::RotateAdmin(_)) {
+            Self::supersede_pending_admin_rotation(&env, proposal_id)?;
+        }
+
         let mut approvals = Vec::new(&env);
         approvals.push_back(proposer.clone());
 
@@ -842,9 +850,33 @@ impl AccessControlContract {
         if env.ledger().timestamp() > proposal.expires_at {
             return Err(AccessControlError::ProposalExpired);
         }
-        if proposal.approvals.len() < config.threshold {
+
+        // ── Issue #915: Re-validate voters against the current live signer set ──
+        // A signer may have been removed after casting their vote.  Counting stale
+        // approvals toward quorum lets a former signer's weight persist after
+        // rotation, undermining the multisig guarantee.
+        //
+        // Filter `proposal.approvals` to only those addresses still present in
+        // `config.signers` (the current set), then compare the valid count against
+        // the current threshold.  Emit an event if any approvals are discarded so
+        // off-chain monitors can alert on signer-set drift.
+        let total_recorded: u32 = proposal.approvals.len();
+        let mut valid_count: u32 = 0;
+        for i in 0..proposal.approvals.len() {
+            let voter = proposal.approvals.get(i).ok_or(AccessControlError::Unauthorized)?;
+            // Check if this voter is still in the current signer set
+            if Self::require_signer(&config, &voter).is_ok() {
+                valid_count += 1;
+            }
+        }
+        let discarded_count: u32 = total_recorded.saturating_sub(valid_count);
+        if discarded_count > 0 {
+            events::stale_votes_discarded(&env, proposal_id, &executor, discarded_count, valid_count);
+        }
+        if valid_count < config.threshold {
             return Err(AccessControlError::ThresholdNotMet);
         }
+        // ── End Issue #915 ──────────────────────────────────────────────────────
 
         proposal.executed = true;
         env.storage()
@@ -905,26 +937,7 @@ impl AccessControlContract {
                 events::admin_transferred(&env, &executor, &new_admin);
             }
             AdminAction::RotateAdmin(new_admin) => {
-                // RotateAdmin: same storage effect as TransferAdmin but emits the
-                // dedicated `admin_rotated` event so off-chain monitors can alert on
-                // key-compromise recovery flows specifically.
-                Self::validate_transfer_admin_target(&env, &new_admin, &current_admin)?;
-                // Guard: block rotation while any OTHER active (un-executed, un-cancelled,
-                // unexpired) proposal exists, to prevent race between a pending
-                // governance action and an emergency rotation.
-                // (Skip `proposal_id` itself — it is already marked executed above.)
-                Self::require_no_other_active_proposals(&env, proposal_id)?;
-                env.storage().persistent().set(&DataKey::Admin, &new_admin);
-                Self::bump_persistent(&env, &DataKey::Admin);
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::Role(new_admin.clone()), &Role::Admin);
-                Self::bump_persistent(&env, &DataKey::Role(new_admin.clone()));
-                // Remove old admin's role entry
-                env.storage()
-                    .persistent()
-                    .remove(&DataKey::Role(current_admin.clone()));
-                events::admin_rotated(&env, &executor, &current_admin, &new_admin);
+                Self::execute_admin_rotation(&env, &executor, &new_admin, &proposal)?;
             }
             AdminAction::ResolveDispute(resolver, invoice_id, upheld) => {
                 // Issue #671: Governance-gated dispute resolution
@@ -1032,8 +1045,31 @@ impl AccessControlContract {
             if env.ledger().timestamp() > proposal.expires_at {
                 return Err(AccessControlError::ProposalExpired);
             }
-            if proposal.approvals.len() < config.threshold {
+
+            // ── Issue #915: Re-validate voters against the live signer set ──────
+            let total_recorded: u32 = proposal.approvals.len();
+            let mut valid_count: u32 = 0;
+            for j in 0..proposal.approvals.len() {
+                let voter = proposal.approvals.get(j).ok_or(AccessControlError::Unauthorized)?;
+                if Self::require_signer(&config, &voter).is_ok() {
+                    valid_count += 1;
+                }
+            }
+            let discarded_count: u32 = total_recorded.saturating_sub(valid_count);
+            if discarded_count > 0 {
+                events::stale_votes_discarded(
+                    &env,
+                    proposal_id,
+                    &executor,
+                    discarded_count,
+                    valid_count,
+                );
+            }
+            if valid_count < config.threshold {
                 return Err(AccessControlError::ThresholdNotMet);
+            }
+            if matches!(&proposal.action, AdminAction::RotateAdmin(_)) {
+                Self::validate_admin_rotation_timing(&env, &proposal)?;
             }
 
             // Check for conflicts with previously validated proposals
@@ -1106,18 +1142,7 @@ impl AccessControlContract {
                             events::admin_transferred(&env, &executor, new_admin);
                         }
                         AdminAction::RotateAdmin(new_admin) => {
-                            Self::validate_transfer_admin_target(&env, new_admin, &current_admin)?;
-                            Self::require_no_other_active_proposals(&env, proposal_id)?;
-                            env.storage().persistent().set(&DataKey::Admin, new_admin);
-                            Self::bump_persistent(&env, &DataKey::Admin);
-                            env.storage()
-                                .persistent()
-                                .set(&DataKey::Role(new_admin.clone()), &Role::Admin);
-                            Self::bump_persistent(&env, &DataKey::Role(new_admin.clone()));
-                            env.storage()
-                                .persistent()
-                                .remove(&DataKey::Role(current_admin.clone()));
-                            events::admin_rotated(&env, &executor, &current_admin, new_admin);
+                            Self::execute_admin_rotation(&env, &executor, new_admin, &proposal)?;
                         }
                         AdminAction::ResolveDispute(resolver, invoice_id, upheld) => {
                             if let Some(dispute_resolution) = env.storage()
@@ -2408,6 +2433,114 @@ impl AccessControlContract {
     /// racing with a governance proposal that was voted for the *old* admin.
     fn require_no_active_proposals(env: &Env) -> Result<(), AccessControlError> {
         Self::require_no_other_active_proposals(env, u64::MAX)
+    }
+
+    fn supersede_pending_admin_rotation(
+        env: &Env,
+        new_proposal_id: u64,
+    ) -> Result<(), AccessControlError> {
+        if let Some(previous_id) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&DataKey::PendingAdminRotation)
+        {
+            if let Some(mut previous) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Proposal>(&DataKey::Proposal(previous_id))
+            {
+                if !previous.executed
+                    && !previous.cancelled
+                    && env.ledger().timestamp() <= previous.expires_at
+                    && matches!(&previous.action, AdminAction::RotateAdmin(_))
+                {
+                    previous.cancelled = true;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::Proposal(previous_id), &previous);
+                    Self::bump_persistent(env, &DataKey::Proposal(previous_id));
+                }
+            }
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::PendingAdminRotation, &new_proposal_id);
+        Self::bump_persistent(env, &DataKey::PendingAdminRotation);
+        Ok(())
+    }
+
+    fn validate_admin_rotation_timing(
+        env: &Env,
+        proposal: &Proposal,
+    ) -> Result<(), AccessControlError> {
+        let activation_at = proposal
+            .created_at
+            .checked_add(GOVERNANCE_TIMELOCK_DELAY)
+            .ok_or(AccessControlError::ArithmeticOverflow)?;
+        if env.ledger().timestamp() > proposal.expires_at || activation_at > proposal.expires_at {
+            return Err(AccessControlError::ProposalExpired);
+        }
+        if env.ledger().timestamp() < activation_at {
+            return Err(AccessControlError::GovernanceTimelockNotElapsed);
+        }
+        Ok(())
+    }
+
+    fn execute_admin_rotation(
+        env: &Env,
+        executor: &Address,
+        new_admin: &Address,
+        proposal: &Proposal,
+    ) -> Result<(), AccessControlError> {
+        Self::validate_admin_rotation_timing(env, proposal)?;
+        if env
+            .storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+        {
+            return Err(AccessControlError::AdminRotationWhilePaused);
+        }
+
+        let current_admin: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .ok_or(AccessControlError::NotInitialized)?;
+        Self::validate_transfer_admin_target(env, new_admin, &current_admin)?;
+        Self::require_no_other_active_proposals(env, proposal.id)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Admin, new_admin);
+        Self::bump_persistent(env, &DataKey::Admin);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Role(new_admin.clone()), &Role::Admin);
+        Self::bump_persistent(env, &DataKey::Role(new_admin.clone()));
+        env.storage()
+            .persistent()
+            .remove(&DataKey::Role(current_admin.clone()));
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, u64>(&DataKey::PendingAdminRotation)
+            == Some(proposal.id)
+        {
+            env.storage()
+                .persistent()
+                .remove(&DataKey::PendingAdminRotation);
+        }
+
+        events::admin_rotated(env, executor, &current_admin, new_admin);
+        Self::append_audit_entry(
+            env,
+            executor,
+            AdminActionType::RotateAdmin,
+            new_admin.clone().into_val(env),
+        );
+        Ok(())
     }
 
     /// Like `require_no_active_proposals` but skips `skip_id` (used by

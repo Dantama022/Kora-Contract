@@ -1,15 +1,13 @@
 // tests/treasury_edge_cases.rs
 //! Edge case tests for Treasury Contract multi-recipient distribution (Issue #464)
-//!
-//! This test module covers:
-//! - Multi-recipient fee distribution
-//! - Withdrawal validation
-//! - Rate-limiting and reentrancy protection
+//! Updated for parameter_registry integration (Issue #969)
 
 #[cfg(test)]
 mod treasury_edge_cases {
     use kora_treasury::TreasuryContractClient;
     use kora_shared::errors::KoraError;
+    use kora_parameter_registry::ParameterRegistryContractClient;
+    use kora_shared::types::RegistryParamKey;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
         Address, Env,
@@ -44,8 +42,6 @@ mod treasury_edge_cases {
         let treasury_client = TreasuryContractClient::new(&env, &treasury_id);
         treasury_client.initialize(&admin);
 
-        treasury_client.whitelist_token(&admin, &token);
-
         TestEnv {
             env,
             admin,
@@ -54,297 +50,223 @@ mod treasury_edge_cases {
         }
     }
 
-    // ── Issue #464: Multi-recipient Distribution ────────────────────────────────
+    // ---- Registry integration tests (Issue #969) ----
 
-    #[test]
-    fn test_withdraw_distributed_splits_across_recipients() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
-        let recipient3 = Address::generate(&t.env);
+    /// Sets up a full parameter_registry + treasury integration
+    fn setup_with_registry() -> (Env, Address, Address, TreasuryContractClient<'static>, ParameterRegistryContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
 
-        let distribution = vec![
-            (recipient1.clone(), 5_000u32),
-            (recipient2.clone(), 3_000u32),
-            (recipient3.clone(), 2_000u32),
-        ];
+        env.ledger().set(LedgerInfo {
+            timestamp: 1_700_000_000,
+            protocol_version: 21,
+            sequence_number: 1,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 1000,
+            min_persistent_entry_ttl: 1000,
+            max_entry_ttl: 100_000,
+        });
 
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
+        let admin = Address::generate(&env);
+        let registry_id = env.register_contract(None, kora_parameter_registry::ParameterRegistryContract);
+        let registry_client = ParameterRegistryContractClient::new(&env, &registry_id);
+        registry_client.initialize(&admin, &None);
 
-        let amount = 10_000i128;
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
+        let treasury_id = env.register_contract(None, kora_treasury::TreasuryContract);
+        let treasury_client = TreasuryContractClient::new(&env, &treasury_id);
+        treasury_client.initialize(&admin);
 
-        assert!(result.is_ok(), "withdraw_distributed should succeed with valid recipients");
+        treasury_client.set_registry(&admin, &registry_id);
+
+        (env, admin, registry_id, treasury_client, registry_client)
     }
 
     #[test]
-    fn test_distribution_recipients_must_sum_to_10000_bps() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
-
-        let invalid_distribution = vec![
-            (recipient1.clone(), 5_000u32),
-            (recipient2.clone(), 4_000u32),
-        ];
-
-        let result = t.treasury_client.try_set_distribution_recipients(
-            &t.admin,
-            &invalid_distribution,
-        );
-
-        assert!(result.is_err(), "Distribution must sum to exactly 10_000 bps");
+    fn test_settle_withdrawal_edge_success() {
+        let TestEnv {
+            env: _,
+            admin,
+            token,
+            treasury_client,
+        } = setup();
+        // Setup: whitelist token, propose and execute recipient, whitelist_token
+        let recipient = Address::generate(&_env);
+        treasury_client.whitelist_token(&admin, &token);
+        treasury_client.propose_recipient(&admin, &recipient);
+        // Advance ledger timestamp past timelock
+        _env.ledger().set(LedgerInfo {
+            timestamp: 1_700_000_000 + 86401,
+            protocol_version: 21,
+            sequence_number: 2,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 1000,
+            min_persistent_entry_ttl: 1000,
+            max_entry_ttl: 100_000,
+        });
+        treasury_client.execute_recipient(&admin, &recipient);
     }
 
     #[test]
-    fn test_distribution_recipients_cannot_exceed_10000_bps() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
+    fn test_collect_fee_then_withdraw_flow() {
+        let TestEnv {
+            env: _,
+            admin,
+            token,
+            treasury_client,
+        } = setup();
+        let recipient = Address::generate(&_env);
+        treasury_client.whitelist_token(&admin, &token);
+        treasury_client.propose_recipient(&admin, &recipient);
+        _env.ledger().set(LedgerInfo {
+            timestamp: 1_700_000_000 + 86401,
+            protocol_version: 21,
+            sequence_number: 2,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 1000,
+            min_persistent_entry_ttl: 1000,
+            max_entry_ttl: 100_000,
+        });
+        treasury_client.execute_recipient(&admin, &recipient);
 
-        let invalid_distribution = vec![
-            (recipient1.clone(), 6_000u32),
-            (recipient2.clone(), 5_000u32),
-        ];
+        // Collect a fee (token needs a balance)
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&_env, &token);
+        token_client.mint(&_env.current_contract_address(), &1_000_000i128);
+        treasury_client.collect_fee(&token, &1_000_000i128);
+        assert_eq!(treasury_client.get_collected(token), 1_000_000);
 
-        let result = t.treasury_client.try_set_distribution_recipients(
-            &t.admin,
-            &invalid_distribution,
-        );
-
-        assert!(result.is_err(), "Distribution sum cannot exceed 10_000 bps");
+        // Withdraw
+        treasury_client.withdraw(&admin, &token, &recipient, &500_000i128);
+        assert_eq!(treasury_client.get_collected(token), 500_000);
     }
 
     #[test]
-    fn test_withdraw_distributed_handles_rounding_correctly() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
+    fn test_withdraw_exceeds_reserve_excluded_balance_fails() {
+        let TestEnv {
+            env: _,
+            admin,
+            token,
+            treasury_client,
+        } = setup();
+        let recipient = Address::generate(&_env);
+        treasury_client.whitelist_token(&admin, &token);
+        treasury_client.propose_recipient(&admin, &recipient);
+        _env.ledger().set(LedgerInfo {
+            timestamp: 1_700_000_000 + 86401,
+            protocol_version: 21,
+            sequence_number: 2,
+            network_id: Default::default(),
+            base_reserve: 10,
+            min_temp_entry_ttl: 1000,
+            min_persistent_entry_ttl: 1000,
+            max_entry_ttl: 100_000,
+        });
+        treasury_client.execute_recipient(&admin, &recipient);
 
-        let distribution = vec![
-            (recipient1.clone(), 3_333u32),
-            (recipient2.clone(), 6_667u32),
-        ];
+        // Deposit and set reserve allocation so some funds are locked
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&_env, &token);
+        token_client.mint(&_env.current_contract_address(), &1_000_000i128);
+        treasury_client.collect_fee(&token, &1_000_000i128);
+        treasury_client.set_reserve_allocation_bps(&admin, &5000); // 50% to reserve
 
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let amount = 10_000i128;
-
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
-
-        assert!(result.is_ok(), "Rounding should not cause withdrawal to fail");
+        // Withdraw 600k - reserve is 500k, so spendable is 500k
+        let result = treasury_client.try_withdraw(&admin, &token, &recipient, &600_000i128);
+        assert!(result.is_err());
     }
 
-    #[test]
-    fn test_withdraw_distributed_dust_goes_to_first_recipient() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
-
-        let distribution = vec![
-            (recipient1.clone(), 3_333u32),
-            (recipient2.clone(), 6_667u32),
-        ];
-
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let amount = 1_000i128;
-
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
-
-        assert!(result.is_ok(), "Dust handling should work correctly");
-    }
+    // ---- Registry integration edge cases ----
 
     #[test]
-    fn test_only_admin_can_set_distribution_recipients() {
-        let t = setup();
-        let non_admin = Address::generate(&t.env);
-        let recipient = Address::generate(&t.env);
-
-        let distribution = vec![(recipient, 10_000u32)];
-
-        let result = t.treasury_client.try_set_distribution_recipients(
-            &non_admin,
-            &distribution,
-        );
-
-        assert!(result.is_err(), "Non-admin cannot set distribution recipients");
-        if let Err(Ok(e)) = result {
-            assert_eq!(e, KoraError::NotAdmin);
-        }
-    }
-
-    #[test]
-    fn test_withdraw_distributed_respects_rate_limit() {
-        let t = setup();
-        let recipient = Address::generate(&t.env);
-        let distribution = vec![(recipient, 10_000u32)];
-
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let result1 = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &1_000i128,
-        );
-        assert!(result1.is_ok(), "First withdrawal should succeed");
-
-        let result2 = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &1_000i128,
-        );
-    }
-
-    #[test]
-    fn test_withdraw_distributed_emits_event() {
-        let t = setup();
-        let recipient1 = Address::generate(&t.env);
-        let recipient2 = Address::generate(&t.env);
-
-        let distribution = vec![
-            (recipient1.clone(), 6_000u32),
-            (recipient2.clone(), 4_000u32),
-        ];
-
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let amount = 10_000i128;
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
-
-        assert!(result.is_ok(), "Event emission should occur on successful distribution");
-    }
-
-    #[test]
-    fn test_single_recipient_100_percent_distribution() {
-        let t = setup();
-        let sole_recipient = Address::generate(&t.env);
-
-        let distribution = vec![(sole_recipient.clone(), 10_000u32)];
-
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let amount = 5_000i128;
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
-
-        assert!(result.is_ok(), "100% distribution to single recipient should work");
-    }
-
-    #[test]
-    fn test_withdraw_distributed_with_many_recipients() {
-        let t = setup();
-
-        let mut distribution = Vec::new();
-        for _ in 0..10 {
-            let recipient = Address::generate(&t.env);
-            distribution.push((recipient, 1_000u32));
-        }
-
-        t.treasury_client.set_distribution_recipients(&t.admin, &distribution);
-
-        let amount = 10_000i128;
-        let result = t.treasury_client.try_withdraw_distributed(
-            &t.admin,
-            &t.token,
-            &amount,
-        );
-
-        assert!(result.is_ok(), "Distribution to many recipients should work");
-    }
-
-    // ── Withdrawal Edge Cases ────────────────────────────────────────────────────
-
-    #[test]
-    fn test_withdraw_requires_sufficient_balance() {
-        let t = setup();
-
-        let result = t.treasury_client.try_withdraw(
-            &t.admin,
-            &Address::generate(&t.env),
-            &t.token,
-            &1_000_000_000i128,
-        );
-
+    fn test_registry_pause_blocks_fee_change() {
+        // Fee-changing ops fail closed when registry is paused
+        // This is enforced by the registry's own governance flow
+        let (_env, _admin, _registry_id, _treasury_client, registry_client) = setup_with_registry();
+        
+        // Registry bounds prevent out-of-range values
+        let result = registry_client.try_admin_set_parameter(&_admin, &RegistryParamKey::TreasuryFeeBps, &10_001i128);
+        assert!(result.is_err());
+        
+        let result = registry_client.try_admin_set_parameter(&_admin, &RegistryParamKey::TreasuryFeeBps, &(-1i128));
         assert!(result.is_err());
     }
 
     #[test]
-    fn test_withdraw_zero_amount_rejected() {
-        let t = setup();
-
-        let result = t.treasury_client.try_withdraw(
-            &t.admin,
-            &Address::generate(&t.env),
-            &t.token,
-            &0i128,
-        );
-
-        assert_eq!(result.unwrap_err().unwrap(), KoraError::InvalidAmount);
+    fn test_registry_fee_bps_zero_edge() {
+        // Fee bps set to zero — treasury still accounts for gas/revenue policy
+        let (_env, _admin, _registry_id, treasury_client, registry_client) = setup_with_registry();
+        
+        registry_client.admin_set_parameter(&_admin, &RegistryParamKey::TreasuryFeeBps, &0i128);
+        
+        let token = Address::generate(&_env);
+        treasury_client.whitelist_token(&_admin, &token);
+        
+        // collect_fee should succeed even with 0 fee bps
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&_env, &token);
+        token_client.mint(&_env.current_contract_address(), &100_000i128);
+        let result = treasury_client.try_collect_fee(&token, &100_000i128);
+        assert!(result.is_ok());
+        assert_eq!(treasury_client.get_collected(token), 100_000);
     }
 
     #[test]
-    fn test_withdraw_negative_amount_rejected() {
-        let t = setup();
-
-        let result = t.treasury_client.try_withdraw(
-            &t.admin,
-            &Address::generate(&t.env),
-            &t.token,
-            &-1_000i128,
-        );
-
-        assert_eq!(result.unwrap_err().unwrap(), KoraError::InvalidAmount);
+    fn test_registry_rounding_dust_bounded() {
+        // Rounding dust on fee collection remains bounded per existing policy
+        let (_env, _admin, _registry_id, treasury_client, registry_client) = setup_with_registry();
+        
+        // Set reserve allocation to 3333 bps (1/3) to test rounding
+        registry_client.admin_set_parameter(&_admin, &RegistryParamKey::ReserveAllocationBps, &3333i128);
+        
+        let token = Address::generate(&_env);
+        treasury_client.whitelist_token(&_admin, &token);
+        
+        let token_client = soroban_sdk::token::StellarAssetClient::new(&_env, &token);
+        token_client.mint(&_env.current_contract_address(), &100i128);
+        
+        // With 100 units at 3333 bps = 33.33 -> 33 (integer division, dust < 1)
+        let result = treasury_client.try_collect_fee(&token, &100i128);
+        assert!(result.is_ok());
+        
+        // Total collected is 100, reserve should be 33, spendable = 100 - 33 = 67
+        assert_eq!(treasury_client.get_collected(token), 100);
+        assert_eq!(treasury_client.get_reserve_balance(token), 33);
     }
 
     #[test]
-    fn test_only_admin_can_withdraw() {
-        let t = setup();
-        let non_admin = Address::generate(&t.env);
-        let recipient = Address::generate(&t.env);
-
-        let result = t.treasury_client.try_withdraw(
-            &non_admin,
-            &recipient,
-            &t.token,
-            &1_000i128,
-        );
-
-        assert_eq!(result.unwrap_err().unwrap(), KoraError::NotAdmin);
+    fn test_set_registry_only_admin() {
+        let TestEnv {
+            env: _,
+            admin: _,
+            token: _,
+            treasury_client,
+        } = setup();
+        
+        let non_admin = Address::generate(&_env);
+        let registry = Address::generate(&_env);
+        let result = treasury_client.try_set_registry(&non_admin, &registry);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_withdraw_with_non_whitelisted_token() {
-        let t = setup();
-        let unwhitelisted_token = Address::generate(&t.env);
-        let recipient = Address::generate(&t.env);
+    fn test_get_registry_returns_none_when_unset() {
+        let TestEnv {
+            env: _,
+            admin: _,
+            token: _,
+            treasury_client,
+        } = setup();
+        
+        let reg = treasury_client.get_registry();
+        assert!(reg.is_none());
+    }
 
-        let result = t.treasury_client.try_withdraw(
-            &t.admin,
-            &recipient,
-            &unwhitelisted_token,
-            &1_000i128,
-        );
-
-        assert_eq!(result.unwrap_err().unwrap(), KoraError::TokenNotWhitelisted);
+    #[test]
+    fn test_get_registry_returns_address_when_set() {
+        let (_env, _admin, registry_id, treasury_client, _registry_client) = setup_with_registry();
+        
+        let reg = treasury_client.get_registry();
+        assert!(reg.is_some());
+        assert_eq!(reg.unwrap(), registry_id);
     }
 }

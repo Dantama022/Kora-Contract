@@ -137,6 +137,7 @@ pub enum AdminActionType {
     DiscretionaryWithdrawalApprove,
     DiscretionaryWithdrawalExecute,
     DiscretionaryWithdrawalCancel,
+    SetTokenDecimals,
 }
 
 /// New AuditSource variants for the new contracts.

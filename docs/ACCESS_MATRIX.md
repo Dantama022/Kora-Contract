@@ -647,9 +647,94 @@ When adding a new public function to any contract:
 4. ☑️ Run `cargo run -p kora-xtask --bin check_access_matrix` locally before commit
 5. ☑️ Document any conditional authorization (pause, state, multisig)
 
+**Adding a new contract to `scripts/deploy.sh`?** Also add all its `pub fn` rows below (issues #917).
+
 **Undocumented New Entrypoint = CI Failure**
 
 The automated checker flags any `pub fn` not present in this matrix as an error, forcing developers to consciously decide and document authorization requirements.
+
+---
+
+### 9. secondary_market (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | Sets admin, financing_pool, treasury, fee |
+| `pause` | **Admin** | | Halts all market operations |
+| `unpause` | **Admin** | | Resumes market operations |
+| `update_protocol_fee_bps` | **Admin** | fee ≤ 1000 bps | |
+| `list_position` | **Investor (Self)** | Not paused; seller holds the position | Creates sale offer |
+| `buy_position` | **Buyer (Self)** | Not paused; listing exists; buyer ≠ seller | CEI: clear listing before transfers |
+| `cancel_listing` | **Seller (Self)** | Listing exists | Removes offer |
+
+---
+
+### 10. fractionalizer (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `wrap` | **Position Owner (Self)** | Caller holds the position | Tokenises position into shares |
+| `transfer_shares` | **Share Owner (Self)** | | OTC share transfer |
+| `settle` | **Admin** | | Distributes proceeds to all shareholders |
+| `redeem` | **Share Owner (Self)** | Settlement completed | Withdraws pro-rata proceeds |
+| `unwrap` | **Original Owner (Self)** | All shares still held by wrapper | Reverses fractionalisation |
+| `get_wrap` | Permissionless | Read-only | |
+| `get_share_balance` | Permissionless | Read-only | |
+
+---
+
+### 11. dispute_escrow (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | Sets admin and pool |
+| `open_dispute` | **Challenger (Self)** | Invoice funded; no existing dispute | |
+| `resolve_dispute` | **Admin** | Dispute open | Releases/returns escrow funds |
+| `resolve_timeout` | **Anyone** | Dispute window elapsed | Permissionless timeout resolution |
+| `get_dispute` | Permissionless | Read-only | |
+
+---
+
+### 12. governance_voting (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `set_voting_weight` | **Admin** | | Sets stake weight for an address |
+| `get_voting_weight` | Permissionless | Read-only | |
+| `delegate` | **Voter (Self)** | Caller has voting weight | Standing delegation |
+| `revoke_delegation` | **Voter (Self)** | Delegation exists | |
+| `get_delegate` | Permissionless | Read-only | |
+| `create_proposal` | **Voter (Self)** | Stake ≥ min_stake | |
+| `vote` | **Voter (Self)** | Proposal active; not already voted | |
+| `get_proposal` | Permissionless | Read-only | |
+| `get_vote_record` | Permissionless | Read-only | |
+| `execute_proposal` | **Admin** | Passed; timelock elapsed | |
+
+---
+
+### 13. referral_rewards (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `deposit` | **Admin** | | Loads reward pool |
+| `claim_referral_reward` | **SME (Self)** | Eligible; not yet claimed | |
+| `has_claimed` | Permissionless | Read-only | |
+| `paid_total` | Permissionless | Read-only | |
+
+---
+
+## Contributor Guide: Adding New Matrix Rows
+
+When you add a new `pub fn` to any contract in `contracts/` **or** add a new contract to `scripts/deploy.sh`:
+
+1. Add the row to this file under the appropriate contract section.
+2. Run `cargo run -p kora-xtask --bin check-access-matrix` locally to verify no drift.
+3. The CI `access-matrix-check` job will block the PR if the row is missing.
+
+Naming convention for the `contracts` column: use the snake_case crate directory name (e.g. `secondary_market`, not `kora-secondary-market`).
 
 ---
 

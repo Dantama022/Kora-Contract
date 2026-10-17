@@ -42,7 +42,8 @@ cd contracts/fuzz/fuzz && cargo +nightly fuzz run fuzz_marketplace
 
 Targets: `fuzz_access_control`, `fuzz_invoice_nft`, `fuzz_marketplace`,
 `fuzz_financing_pool`, `fuzz_treasury`, `fuzz_risk_registry`,
-`fuzz_price_oracle`, `fuzz_marketplace_fee`, `fuzz_dispute_resolution`.
+`fuzz_price_oracle`, `fuzz_marketplace_fee`, `fuzz_dispute_resolution`,
+`fuzz_secondary_market_settlement`.
 
 ### Dispute state transitions (#919)
 

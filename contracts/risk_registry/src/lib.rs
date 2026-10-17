@@ -53,6 +53,7 @@ pub enum RiskRegistryError {
     RemovalCooldownNotElapsed = 29,
     VerifierSuspended = 30,
     ReadditionCooldownNotElapsed = 31,
+    AccessControlNotConfigured = 32,
 }
 
 impl From<CommonError> for RiskRegistryError {
@@ -131,6 +132,7 @@ pub struct Dispute {
 pub enum DataKey {
     Admin,
     PendingAdmin,
+    AccessControl,
     InvoiceNft, // authorized caller for increment_invoice_count
     StakingToken, // token contract for verifier stakes
     MinimumStake, // minimum stake amount required to become verifier
@@ -271,6 +273,21 @@ impl RiskRegistryContract {
 
         events::registry_initialized(&env, &admin, &invoice_nft);
         Ok(())
+    }
+
+    /// Set or update the access_control contract address. Admin only.
+    pub fn set_access_control(env: Env, admin: Address, access_control: Address) -> Result<(), RiskRegistryError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        kora_shared::validation::require_not_self(&env, &access_control)?;
+        env.storage().persistent().set(&DataKey::AccessControl, &access_control);
+        Self::bump_persistent(&env, &DataKey::AccessControl);
+        Ok(())
+    }
+
+    /// Get the configured access_control contract address, if any.
+    pub fn get_access_control(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::AccessControl)
     }
 
     /// Transfer admin role to a new address. Current admin only.
@@ -476,7 +493,10 @@ impl RiskRegistryContract {
         Self::bump_persistent(&env, &DataKey::VerifierReputation(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::VerifierBond(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::DisputeCount(verifier.clone()));
-        // TODO: Sync with access_control: AccessControlContractClient::new(&env, &access_control).grant_role(&admin, &verifier, Role::Verifier)?;
+        if let Some(ac_addr) = env.storage().persistent().get::<_, Address>(&DataKey::AccessControl) {
+            let ac_client = kora_access_control::AccessControlContractClient::new(&env, &ac_addr);
+            ac_client.grant_role(&admin, &verifier, &kora_access_control::Role::Verifier);
+        }
         events::verifier_added(&env, &admin, &verifier);
         Self::append_audit_entry(&env, &admin, AdminActionType::AddVerifier);
         Ok(())
@@ -638,7 +658,10 @@ impl RiskRegistryContract {
         Self::bump_persistent(&env, &DataKey::VerifierStatus(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::VerifierStatusChangedAt(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::VerifierLastRemovedAt(verifier.clone()));
-        // TODO: Sync with access_control: AccessControlContractClient::new(&env, &access_control).revoke_role(&admin, &verifier)?;
+        if let Some(ac_addr) = env.storage().persistent().get::<_, Address>(&DataKey::AccessControl) {
+            let ac_client = kora_access_control::AccessControlContractClient::new(&env, &ac_addr);
+            ac_client.revoke_role(&admin, &verifier);
+        }
         events::verifier_removed(&env, &admin, &verifier);
         Self::append_audit_entry(&env, &admin, AdminActionType::RemoveVerifier);
         Ok(())
@@ -837,6 +860,10 @@ impl RiskRegistryContract {
         Self::bump_persistent(&env, &DataKey::VerifierStatus(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::VerifierStatusChangedAt(verifier.clone()));
         Self::bump_persistent(&env, &DataKey::VerifierLastRemovedAt(verifier.clone()));
+        if let Some(ac_addr) = env.storage().persistent().get::<_, Address>(&DataKey::AccessControl) {
+            let ac_client = kora_access_control::AccessControlContractClient::new(&env, &ac_addr);
+            ac_client.revoke_role(&admin, &verifier);
+        }
         events::verifier_removed(&env, &admin, &verifier);
         Self::append_audit_entry(&env, &admin, AdminActionType::FinalizeVerifierRemoval);
         Ok(())

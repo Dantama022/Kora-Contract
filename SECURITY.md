@@ -12,9 +12,11 @@
 
 ### Submission
 
-**Email:** security@kora.finance (PGP key available at [kora.finance/.well-known/pgp-key.txt](https://kora.finance/.well-known/pgp-key.txt))
+**GitHub Security Advisory:** [OpenLedger-Foundation/Kora-Contract Security Advisories](https://github.com/OpenLedger-Foundation/Kora-Contract/security/advisories/new)
 
-**GitHub Security Advisory:** [Create private advisory](https://github.com/kora-finance/contracts/security/advisories/new)
+**Email:** security@openledger.info / security@kora.finance
+
+If private vulnerability reporting is undergoing configuration or unavailable on GitHub, security researchers can contact the core security team directly via GitHub security contacts or email security@openledger.info.
 
 **Required Information:**
 - Description of the vulnerability

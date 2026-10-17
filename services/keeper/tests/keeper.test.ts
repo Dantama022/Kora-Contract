@@ -18,6 +18,7 @@ import * as fs from "fs";
 import { JobStore } from "../src/jobStore";
 import { Dispatcher } from "../src/dispatcher";
 import { Scheduler } from "../src/scheduler";
+import { ListingTtlKeeper } from "../src/ttlKeeper";
 import { Deadline, Job, KeeperConfig, TriggerResult } from "../src/types";
 
 // ---------------------------------------------------------------------------
@@ -47,6 +48,10 @@ const BASE_CONFIG: KeeperConfig = {
   maxAttempts: 3,
   retryBackoffBaseMs: 100, // short for tests
   networkPassphrase: "Test SDF Network ; September 2015",
+  marketplaceContractAddress: "CTEST000000000000000000000000000000000000000000000000000",
+  activeListingsUrl: "https://indexer.test/api/v1/listings",
+  indexerApiKey: "",
+  ttlThresholdLedgers: 518_400,
 };
 
 // ---------------------------------------------------------------------------
@@ -302,6 +307,21 @@ describe("Scheduler integration", () => {
     expect(store.getByStatus("pending")).toHaveLength(1);
   });
 
+  test("TTL scan jobs enter the durable queue before dispatch", async () => {
+    const ttlDeadline = makeDeadline({
+      kind: "listing_ttl",
+      dedupKey: "listing_ttl:42:1000",
+      deadlineTs: Math.floor(Date.now() / 1000),
+    });
+    const ttlScheduler = new Scheduler(store, dispatcher, { ...BASE_CONFIG, dbPath }, async () => [ttlDeadline]);
+    dispatcher.setNextResponse({ dedupKey: ttlDeadline.dedupKey, outcome: "submitted", txHash: "0xttl" });
+
+    // @ts-expect-error — accessing private method for test
+    await ttlScheduler._tick();
+
+    expect(store.getByStatus("in_flight").map((job) => job.dedupKey)).toContain(ttlDeadline.dedupKey);
+  });
+
   test("full tick cycle: pending → ready → dispatched → done", async () => {
     dispatcher.setNextResponse({
       dedupKey: "funding_expiry:42",
@@ -356,5 +376,52 @@ describe("Scheduler integration", () => {
 
     scheduler2.stop();
     store2.close();
+  });
+});
+
+describe("ListingTtlKeeper", () => {
+  test("schedules active listing only when TTL is below threshold", async () => {
+    const rpc = {
+      getLedgerEntries: async (...keys: Array<{ toXDR: (format: "base64") => string }>) => ({
+        latestLedger: 1000,
+        entries: keys.map((key) => ({ key, liveUntilLedgerSeq: 1200 })),
+      }),
+    };
+    const source = {
+      getActiveListings: async () => [
+        { invoiceId: "42", isActive: true },
+        { invoiceId: "43", isActive: true },
+      ],
+    };
+    const keeper = new ListingTtlKeeper(BASE_CONFIG, rpc as never, source);
+
+    const jobs = await keeper.scan();
+
+    expect(jobs.map((job) => job.dedupKey)).toEqual([
+      "listing_ttl:42:1200",
+      "listing_ttl:43:1200",
+    ]);
+    expect(keeper.getMetrics()).toEqual({ scanned: 2, atRisk: 2, errors: 0 });
+  });
+
+  test("does not schedule entries above the configured threshold", async () => {
+    const rpc = {
+      getLedgerEntries: async (...keys: Array<{ toXDR: (format: "base64") => string }>) => ({
+        latestLedger: 1000,
+        entries: keys.map((key) => ({ key, liveUntilLedgerSeq: 519_400 })),
+      }),
+    };
+    const source = { getActiveListings: async () => [{ invoiceId: "42", isActive: true }] };
+    const keeper = new ListingTtlKeeper(BASE_CONFIG, rpc as never, source);
+
+    await expect(keeper.scan()).resolves.toEqual([]);
+  });
+
+  test("records failed scans and rethrows source errors", async () => {
+    const source = { getActiveListings: async () => { throw new Error("indexer unavailable"); } };
+    const keeper = new ListingTtlKeeper(BASE_CONFIG, {} as never, source);
+
+    await expect(keeper.scan()).rejects.toThrow("indexer unavailable");
+    expect(keeper.getMetrics().errors).toBe(1);
   });
 });
