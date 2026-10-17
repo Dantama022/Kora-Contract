@@ -1,0 +1,346 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "feature/**", "fix/**", "docs/**"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+# Validation follows stable to support the v4 lockfile. Release reproducibility
+# continues to use the separately pinned toolchain in rust-toolchain.toml.
+
+jobs:
+  # ── Type-check all contracts ──────────────────────────────────────────────
+  check:
+    name: cargo check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: cargo check (native)
+        run: cargo check --workspace
+
+      - name: cargo check (wasm32)
+        run: cargo check --workspace --target wasm32-unknown-unknown --exclude kora-tests --exclude kora-fuzz --exclude kora-xtask
+
+  # ── Lint ──────────────────────────────────────────────────────────────────
+  clippy:
+    name: clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-clippy-
+
+      - name: cargo clippy (warnings as errors)
+        run: cargo clippy --workspace -- -D warnings
+
+  # ── Formatting ────────────────────────────────────────────────────────────
+  fmt:
+    name: rustfmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+  # ── Unbounded loop guard ──────────────────────────────────────────────────
+  #
+  # Flags loops over ledger-sourced collections (Map/Vec loaded from
+  # persistent/instance storage) that make a cross-contract call per
+  # iteration with no visible bound — cost scales with on-chain state size
+  # and can exceed Soroban's CPU instruction limit at scale.
+  # financing_pool::distribute_yield is a known, baselined instance; new
+  # occurrences fail this check. See scripts/check_unbounded_loops.py.
+  unbounded-loop-guard:
+    name: unbounded loop guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for unbounded loops with cross-contract calls
+        run: python3 scripts/check_unbounded_loops.py
+
+  # ── Dependency cycle guard (issue #275) ──────────────────────────────────
+  #
+  # Runs `cargo tree` and fails if any cycle is detected.
+  # Cargo itself rejects cyclic Cargo.toml graphs, so this step
+  # catches the error and surfaces it clearly in the CI log.
+  #
+  # If a cycle is ever introduced, cargo tree will exit non-zero and
+  # print the cycle path. Fix by removing the circular dependency.
+  cycle-guard:
+    name: dependency cycle guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-tree-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-tree-
+
+      - name: Install cargo-tree (bundled with cargo, verify it works)
+        run: cargo tree --version
+
+      - name: Check for dependency cycles
+        run: |
+          echo "=== Kora workspace dependency graph ==="
+          cargo tree --workspace --depth 3
+          echo ""
+          echo "=== Cycle check ==="
+          # cargo tree exits non-zero if it encounters a cycle.
+          # An explicit check with --no-dedupe surfaces all paths.
+          if cargo tree --workspace --no-dedupe 2>&1 | grep -i "cycle detected"; then
+            echo "ERROR: Circular dependency detected in workspace."
+            echo "Fix: remove the cycle shown above before merging."
+            exit 1
+          fi
+          echo "No dependency cycles detected."
+
+  # ── KoraError variant consistency guard (issue #421) ─────────────────────
+  #
+  # Fails the build if any contract crate references a `KoraError::Variant`
+  # that isn't actually declared on the `KoraError` enum in
+  # contracts/shared/src/errors.rs — the recurring bug class behind issues
+  # #188, #244, #245, #346, #347. Runs independently of `cargo check` so it
+  # still gives a signal even when the workspace itself fails to compile.
+  error-variant-guard:
+    name: KoraError variant consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-xtask-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-xtask-
+
+      - name: cargo run -p kora-xtask --bin check-error-variants
+        run: cargo run -p kora-xtask --bin check-error-variants
+
+  # ── Unit & integration tests ──────────────────────────────────────────────
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-test-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-test-
+
+      - name: cargo test
+        run: cargo test --workspace
+
+  governance-contract-tests:
+    name: test ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        package:
+          - kora-governance
+          - kora-governance-voting
+          - kora-parameter-registry
+          - kora-dispute-escrow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-test-${{ matrix.package }}-${{ hashFiles('**/Cargo.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-test-${{ matrix.package }}-
+      - name: Run contract unit tests
+        run: cargo test -p ${{ matrix.package }}
+
+  dispute-cross-contract:
+    name: dispute cross-contract settlement
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-dispute-integration-${{ hashFiles('**/Cargo.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-dispute-integration-
+      - name: Run dispute integration scenarios
+        run: cargo test -p kora-tests --test dispute_cross_contract
+
+  dispute-fuzz-smoke:
+    name: dispute state machine fuzz smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Run bounded opcode sequences
+        env:
+          FUZZ_ITERS: "100"
+        run: cargo test -p kora-fuzz --test smoke fuzz_dispute_resolution -- --ignored
+
+  # ── Code coverage gate (issue #643) ──────────────────────────────────────
+  #
+  # Measures code coverage using cargo-tarpaulin with a minimum threshold
+  # to ensure adequate test coverage across the workspace.
+  coverage:
+    name: code coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-coverage-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-coverage-
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked --version 0.21.0
+
+      - name: Run coverage analysis
+        run: make coverage COVERAGE_MIN=95
+
+  # ── Per-contract coverage floor (issue #683) ─────────────────────────────
+  #
+  # The workspace-wide gate above can be masked by a single well-tested
+  # contract. This job enforces an explicit minimum coverage threshold per
+  # contract crate so a poorly-tested contract cannot hide behind the
+  # aggregate number. Floors are set at (or just below) current levels and
+  # should be ratcheted up via follow-ups. Thin wrapper contracts may
+  # warrant a lower floor — document any per-contract exceptions here.
+  per-contract-coverage:
+    name: per-contract coverage floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-coverage-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-coverage-
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked --version 0.21.0
+
+      - name: Enforce per-contract coverage floors
+        run: make coverage-per-contract
+
+  # ── TTL Keeper validation (issue #644) ───────────────────────────────────
+  #
+  # Validates that the TTL keeper script is properly configured for
+  # scheduled execution with proper error handling and network validation.
+  ttl-keeper-validation:
+    name: TTL Keeper validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate TTL keeper script
+        run: ./scripts/test-ttl-keeper.sh

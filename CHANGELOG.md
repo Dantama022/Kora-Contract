@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **#914 Dispute cross-contract harness** — add real pool/escrow callback wiring, evidence and outcome scenarios, custody/accounting assertions, failure rollback and token reentry regression cases, and a dedicated integration CI target. Runtime validation remains pending.
 - **#912 / #911 Governance and escrow CI onboarding** — include governance, governance voting, parameter registry, and dispute escrow in workspace validation, WASM budgets, optimization, metrics, and release hashes. Escrow deployment is opt-in pending production financing-pool callback integration.
 - **#919 Dispute state-machine fuzzing** — add exact-error transition modeling, authorization and terminal-state checks, escrow custody invariants with a mock pool, regression seeds, and bounded CI smoke coverage. Runtime validation remains pending.
 - **Security Hardening Wave** — comprehensive security improvements across the protocol:
@@ -22,6 +23,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **#276 Treasury contract documentation** — new `docs/treasury.md` covers the full `fee_bps` lifecycle, `withdraw` and `emergency_withdraw` flows with step-by-step ordering, the reentrancy guard design, the rolling 24-hour withdrawal rate-limit, the two-step cap/upgrade timelock, a complete public API table, the storage layout, and a threat-model / security analysis.
 
 ### Fixed
+- **#914 Escrow custody reentry protection** — guard open, adjudication, and timeout mutations across external pool/token interactions; preserve existing error codes and add a dedicated reentry error. See `docs/AUDIT_LOG.md`.
 - **#343 Duplicate `KoraError` discriminant 95** *(breaking ABI change)* — `EmptyBytes` and `Reentrancy` previously both used discriminant 95, causing any reentrancy violation to be silently decoded as `EmptyBytes` by off-chain clients and preventing the crate from compiling (E0081). Discriminants are now unique: `NoContribution = 95`, `NotInitialized = 96`, `EmptyBytes = 97`, `Reentrancy = 98`. **Clients that pattern-match on `KoraError::Reentrancy` by its raw u32 value must update their discriminant from 95 to 98.**
 - **#420 Invoice-lifecycle event schema inconsistencies** *(breaking event-schema change)* — `invoice_defaulted` was missing an `amount` field carried by every sibling invoice event, and none of the seven invoice-lifecycle events (`invoice_created`, `invoice_listed`, `invoice_funded`, `invoice_repaid`, `invoice_amended`, `invoice_withdrawn`, `invoice_defaulted`) included the invoice's `currency`, forcing indexers to make a separate `get_invoice` call to interpret the monetary value. `invoice_defaulted` now carries `amount`, and all seven events now carry `currency` (see `docs/EVENTS.md`). **Off-chain indexers decoding these event tuples by fixed position/arity must update to the new schemas.**
 

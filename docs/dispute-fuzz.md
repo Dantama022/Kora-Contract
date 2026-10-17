@@ -72,9 +72,10 @@ cargo +nightly fuzz run fuzz_dispute_resolution ../corpus/dispute_resolution
 - Resolution has `open_dispute`, `submit_evidence`, and `resolve_dispute`;
   there is no `challenge` or `withdraw` entry point. Evidence supplies the
   challenge mutation; escrow adjudication/timeout performs fund release.
-- Resolution does not invoke escrow, and the production financing pool does
-  not implement the escrow callback interface. The companion uses a mock pool;
-  this does **not** establish a deployable end-to-end settlement integration.
+- Resolution does not invoke escrow. The fuzz companion uses a mock pool;
+  production pool callbacks are covered by the separate
+  [cross-contract harness](dispute-escrow.md#cross-contract-scenarios-914).
+  That harness explicitly orchestrates the two adjudication invocations.
 - The access mock exposes signer membership and pause state; it does not
   exercise multisig proposal thresholds, approvals, timelocks, or execution.
   The oracle follows actual signer-membership enforcement, not stronger

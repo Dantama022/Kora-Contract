@@ -47,6 +47,10 @@ path = "issue_470_concentration_cap.rs"
 name = "issue_471_secondary_market_settlement"
 path = "issue_471_secondary_market_settlement.rs"
 
+[[test]]
+name = "secondary_market_fee_routing"
+path = "secondary_market_fee_routing.rs"
+
 # ── Security regression suites (#611–#614) ────────────────────────────────────
 [[test]]
 name = "security_regression_audit_log"
@@ -64,6 +68,11 @@ path = "timelock_bypass_regression.rs"
 name = "multisig_threshold_manipulation"
 path = "multisig_threshold_manipulation.rs"
 
+# ── Governance parameter range abuse tests ─────────────────────────────────
+[[test]]
+name = "governance_parameter_range_abuse"
+path = "governance_parameter_range_abuse.rs"
+
 # ── Cross-contract auth fuzzing harness (Issue #610) ─────────────────────────
 [[test]]
 name = "auth_fuzzing"
@@ -73,6 +82,11 @@ path = "auth_fuzzing.rs"
 [[test]]
 name = "economic_attack_simulation"
 path = "economic_attack_simulation.rs"
+
+# ── Vesting grant lifecycle integration tests (Issue #965) ──────────────────
+[[test]]
+name = "vesting_lifecycle"
+path = "vesting_lifecycle.rs"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
@@ -85,4 +99,5 @@ kora-risk-registry = { path = "../risk_registry" }
 kora-access-control = { path = "../access_control" }
 kora-price-oracle = { path = "../price_oracle" }
 kora-referral-rewards = { path = "../referral_rewards" }
+kora-secondary-market = { path = "../secondary_market" }
 

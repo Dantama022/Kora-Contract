@@ -8,6 +8,8 @@
 mod issue_470_concentration_cap {
     use kora_financing_pool::FinancingPoolContractClient;
     use kora_invoice_nft::InvoiceNftContractClient;
+    use kora_parameter_registry::{ParameterRegistryContract, ParameterRegistryContractClient};
+    use kora_shared::types::RegistryParamKey;
     use soroban_sdk::{
         testutils::{Address as _, Ledger, LedgerInfo},
         Address, Env,
@@ -194,6 +196,142 @@ mod issue_470_concentration_cap {
         );
 
         assert!(result.is_err(), "Contributing over cumulative cap should fail");
+    }
+
+    /// Issue #968: Registry overrides the static max_position_bps.  When the
+    /// parameter_registry is wired and contains a MaxPositionBps key, that
+    /// value is used instead of the constructor default.
+    #[test]
+    fn test_registry_override_lowers_cap() {
+        let t = setup();
+        let invoice_id = 1u64;
+
+        // Deploy and seed the parameter_registry with a low cap (20% = 2000 bps).
+        let registry_id = t.env.register_contract(None, ParameterRegistryContract);
+        let registry = ParameterRegistryContractClient::new(&t.env, &registry_id);
+        registry.initialize(&t.admin, &None);
+
+        // The registry key must exist before the pool will read it; bootstrap
+        // defaults already have it, but we overwrite with the test value.
+        registry
+            .admin_set_parameter(&t.admin, &RegistryParamKey::MaxPositionBps, &2_000i128)
+            .unwrap();
+
+        // Wire the registry into the pool.
+        t.pool_client
+            .set_parameter_registry(&t.admin, &registry_id)
+            .unwrap();
+
+        // Create a pool via release_funds
+        t.nft.mint(&t.admin, &invoice_id, &1_000_000i128, &Default::default());
+        let marketplace = Address::generate(&t.env);
+        t.pool_client
+            .release_funds(&marketplace, &invoice_id, &t.token)
+            .unwrap();
+
+        // Contribute 150k out of 1M (15%, within 20% registry cap) – succeeds.
+        t.pool_client
+            .record_position(&t.admin, &invoice_id, &t.investor, &150_000i128, &1_000_000i128)
+            .unwrap();
+
+        // Contribute another 100k out of 1M (10%, cumulative 25% > 20%) – fails.
+        let result = t.pool_client.record_position(
+            &t.admin,
+            &invoice_id,
+            &t.investor,
+            &100_000i128,
+            &1_000_000i128,
+        );
+        assert!(
+            result.is_err(),
+            "registry-enforced 20% cap should prevent cumulative 25%"
+        );
+    }
+
+    /// Issue #968: Registry can raise the cap above the constructor-stored value.
+    #[test]
+    fn test_registry_override_raises_cap() {
+        let t = setup();
+        let invoice_id = 1u64;
+
+        // Lower the constructor cap to 30% first.
+        t.pool_client
+            .set_max_position_bps(&t.admin, &3_000u32)
+            .unwrap();
+
+        // Deploy and seed the registry with a higher cap (60% = 6000 bps).
+        let registry_id = t.env.register_contract(None, ParameterRegistryContract);
+        let registry = ParameterRegistryContractClient::new(&t.env, &registry_id);
+        registry.initialize(&t.admin, &None);
+        registry
+            .admin_set_parameter(&t.admin, &RegistryParamKey::MaxPositionBps, &6_000i128)
+            .unwrap();
+        t.pool_client
+            .set_parameter_registry(&t.admin, &registry_id)
+            .unwrap();
+
+        // Create a pool.
+        t.nft.mint(&t.admin, &invoice_id, &2_000_000i128, &Default::default());
+        let marketplace = Address::generate(&t.env);
+        t.pool_client
+            .release_funds(&marketplace, &invoice_id, &t.token)
+            .unwrap();
+
+        // Contribute 1M out of 2M (50%) — exceeds the constructor cap (30%) but
+        // is within the registry cap (60%).  With registry wired, this succeeds.
+        t.pool_client
+            .record_position(&t.admin, &invoice_id, &t.investor, &1_000_000i128, &2_000_000i128)
+            .unwrap();
+    }
+
+    /// Issue #968: Without registry, the constructor-stored default/stored value
+    /// is enforced (backward compatible).
+    #[test]
+    fn test_registry_not_wired_uses_constructor_default() {
+        let t = setup();
+        let invoice_id = 1u64;
+
+        // Do NOT wire a registry — rely on the constructor default (10 000 bps).
+        t.pool_client
+            .set_max_position_bps(&t.admin, &3_000u32)
+            .unwrap();
+
+        t.nft.mint(&t.admin, &invoice_id, &1_000_000i128, &Default::default());
+        let marketplace = Address::generate(&t.env);
+        t.pool_client
+            .release_funds(&marketplace, &invoice_id, &t.token)
+            .unwrap();
+
+        // 40% share (4000 bps) exceeds 30% local cap -> fails.
+        let result = t.pool_client.record_position(
+            &t.admin,
+            &invoice_id,
+            &t.investor,
+            &400_000i128,
+            &1_000_000i128,
+        );
+        assert!(result.is_err(), "should use local cap when no registry");
+
+        // 25% share (2500 bps) within 30% local cap -> succeeds.
+        t.pool_client
+            .record_position(&t.admin, &invoice_id, &t.investor, &250_000i128, &1_000_000i128)
+            .unwrap();
+    }
+
+    /// Issue #968: Non-admin cannot set the registry pointer.
+    #[test]
+    fn test_non_admin_cannot_set_registry() {
+        let t = setup();
+        let non_admin = Address::generate(&t.env);
+        let registry_id = Address::generate(&t.env);
+
+        let result = t
+            .pool_client
+            .try_set_parameter_registry(&non_admin, &registry_id);
+        assert!(
+            result.is_err(),
+            "non-admin set_parameter_registry must fail"
+        );
     }
 }
 

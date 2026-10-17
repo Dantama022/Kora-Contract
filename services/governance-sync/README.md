@@ -10,6 +10,27 @@ Syncs on-chain governance proposals from the `governance_voting` contract with a
 - **Retry with Backoff**: Handles forum API downtime gracefully
 - **Read-Only**: One-way sync (chain → forum), no forum-triggered actions
 
+## Weight Formula
+
+Vote weight for each proposal is computed as the beneficiary's **vested token
+balance** at the proposal's `created_at` snapshot timestamp:
+
+```
+weight = vesting_contract.get_vested_balance_at(voter, proposal.created_at)
+```
+
+- If the Vesting contract has not been set on the governance contract, the
+  vote weight falls back to the manual `VotingWeight` storage (backward
+  compatible). Once the vesting contract is set, manual weights are ignored
+  and only vested balances are used.
+- For delegated voting, the delegate's total weight is the sum of their own
+  vested balance plus the vested balance of each delegator (computed at the
+  current ledger timestamp, not the proposal snapshot).
+
+This formula ensures that only economically locked tokens contribute to
+governance influence. The off-chain sync service should read the `snapshot_at`
+field from `voteCast` events to reconcile tallies against vesting state.
+
 ## Architecture
 
 ```
@@ -33,6 +54,9 @@ SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 # Deployed governance_voting address (not governance or parameter_registry)
 GOVERNANCE_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+# Alternatively, read contracts.governance_voting.address from the deploy output
+KORA_DEPLOYMENT_MANIFEST=../../deployments/testnet.json
+
 # Forum API credentials
 FORUM_API_URL=https://forum.example.com/api/v1
 FORUM_API_KEY=your_api_key_here
@@ -51,7 +75,10 @@ DB_PATH=./governance-sync.db
 LOG_LEVEL=info
 ```
 
-`GOVERNANCE_CONTRACT_ID` must identify the contract with the `Proposal` schema
+`GOVERNANCE_CONTRACT_ID` takes precedence. If it is unset, the bridge reads
+`contracts.governance_voting.address` from `KORA_DEPLOYMENT_MANIFEST`, which can
+point at the network manifest written by `scripts/deploy.sh`.
+The address must identify the contract with the `Proposal` schema
 in [`kora-governance-voting`](../../contracts/governance_voting/src/lib.rs).
 Its generated Rust typed client is `GovernanceVotingContractClient`; use
 `get_proposal` to read the title, description, and three vote tallies consumed

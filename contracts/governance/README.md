@@ -43,3 +43,37 @@ Release artifact `kora_governance.wasm` participates in the WASM size gate.
 The onboarding changes were reviewed statically; no build, test, or formatter
 was run at the user's request. Full fast-track lifecycle and target-upgrade
 integration coverage remain gaps.
+
+## Multisig voter re-validation at execution (issue #915)
+
+The `access_control` contract's `execute_action` and `execute_batch` functions
+now re-validate every recorded voter against the **current** signer set at
+execution time.  Votes from addresses that have since been removed from the
+multisig config are silently discarded; the filtered count must still meet the
+current threshold.
+
+When votes are discarded a `stale_votes_discarded` event is emitted with the
+topic `MS_STALE`:
+
+```
+(proposal_id: u64, executor: Address, discarded_count: u32, valid_count: u32, timestamp: u64)
+```
+
+Off-chain monitors should subscribe to this event to alert on signer-set drift.
+
+### Security properties
+
+| Property | Description |
+|----------|-------------|
+| **No stale weight** | A removed signer's historical vote cannot contribute to threshold satisfaction. |
+| **No unbounded loop** | The re-validation loop iterates over `proposal.approvals`, which is bounded by the number of signers at proposal time (≤ `MultisigConfig.signers.len()`). |
+| **Threshold re-evaluated live** | Uses the current `config.threshold` at execution time, not the threshold at proposal time. |
+
+### Test coverage
+
+- `multisig_threshold_manipulation.rs` — Scenarios 11–15 cover:
+  - Stale vote causes execution failure (`#915-11`)
+  - Valid voter after rotation + threshold lowered (`#915-12`)
+  - Removed signer cannot execute alone (`#915-13`)
+  - Duplicate voter entries do not inflate count (`#915-14`)
+  - Happy path with no rotation still works (`#915-15`)

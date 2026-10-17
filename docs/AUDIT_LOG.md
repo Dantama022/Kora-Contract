@@ -4,6 +4,25 @@ This document tracks audit findings, fixes, and their resolution across all prot
 
 ---
 
+## Issue #914: Dispute custody callbacks and reentry protection
+
+**Status:** Code changes and regression cases added; runtime validation pending.
+
+Escrow called pool reservation/settlement hooks that were absent from the pool,
+and custody mutations had no shared lock around external token/pool calls.
+The pool now authenticates its one-time configured escrow, reserves exact
+amounts, and validates settlement before updating repayment accounting. The
+escrow uses the shared RAII guard for open, adjudication, and timeout paths.
+Existing error discriminants and stored pool/dispute record shapes are retained.
+
+`contracts/tests/dispute_cross_contract.rs` adds cross-contract regression
+scenarios, including unauthorized callbacks, duplicate settlement, failed
+transfers, and adversarial-token reentry. The implementation received static
+review only: no application code, tests, builds, or formatters were executed,
+as directed by `task2.txt`. See [scenario matrix](dispute-escrow.md#cross-contract-scenarios-914).
+
+---
+
 ## Finding B27: Event Deduplication in SME Profile Tracking
 
 **Status:** ✅ Fixed in [Unreleased]

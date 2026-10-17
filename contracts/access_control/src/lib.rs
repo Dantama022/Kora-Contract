@@ -850,9 +850,33 @@ impl AccessControlContract {
         if env.ledger().timestamp() > proposal.expires_at {
             return Err(AccessControlError::ProposalExpired);
         }
-        if proposal.approvals.len() < config.threshold {
+
+        // ── Issue #915: Re-validate voters against the current live signer set ──
+        // A signer may have been removed after casting their vote.  Counting stale
+        // approvals toward quorum lets a former signer's weight persist after
+        // rotation, undermining the multisig guarantee.
+        //
+        // Filter `proposal.approvals` to only those addresses still present in
+        // `config.signers` (the current set), then compare the valid count against
+        // the current threshold.  Emit an event if any approvals are discarded so
+        // off-chain monitors can alert on signer-set drift.
+        let total_recorded: u32 = proposal.approvals.len();
+        let mut valid_count: u32 = 0;
+        for i in 0..proposal.approvals.len() {
+            let voter = proposal.approvals.get(i).ok_or(AccessControlError::Unauthorized)?;
+            // Check if this voter is still in the current signer set
+            if Self::require_signer(&config, &voter).is_ok() {
+                valid_count += 1;
+            }
+        }
+        let discarded_count: u32 = total_recorded.saturating_sub(valid_count);
+        if discarded_count > 0 {
+            events::stale_votes_discarded(&env, proposal_id, &executor, discarded_count, valid_count);
+        }
+        if valid_count < config.threshold {
             return Err(AccessControlError::ThresholdNotMet);
         }
+        // ── End Issue #915 ──────────────────────────────────────────────────────
 
         proposal.executed = true;
         env.storage()
@@ -1021,7 +1045,27 @@ impl AccessControlContract {
             if env.ledger().timestamp() > proposal.expires_at {
                 return Err(AccessControlError::ProposalExpired);
             }
-            if proposal.approvals.len() < config.threshold {
+
+            // ── Issue #915: Re-validate voters against the live signer set ──────
+            let total_recorded: u32 = proposal.approvals.len();
+            let mut valid_count: u32 = 0;
+            for j in 0..proposal.approvals.len() {
+                let voter = proposal.approvals.get(j).ok_or(AccessControlError::Unauthorized)?;
+                if Self::require_signer(&config, &voter).is_ok() {
+                    valid_count += 1;
+                }
+            }
+            let discarded_count: u32 = total_recorded.saturating_sub(valid_count);
+            if discarded_count > 0 {
+                events::stale_votes_discarded(
+                    &env,
+                    proposal_id,
+                    &executor,
+                    discarded_count,
+                    valid_count,
+                );
+            }
+            if valid_count < config.threshold {
                 return Err(AccessControlError::ThresholdNotMet);
             }
             if matches!(&proposal.action, AdminAction::RotateAdmin(_)) {

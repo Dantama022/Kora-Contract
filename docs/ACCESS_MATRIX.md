@@ -71,8 +71,10 @@ fn require_admin(&env, caller: &Address) -> Result<(), AccessControlError> {
 | `initialize` | None (one-time) | Must not already be initialized | |
 | `register_sme` | **Self (SME)** | Caller authorizes; verifier attests separately | Permissionless registration |
 | `update_sme_profile` | **Verifier** (assigned to SME) | Must be SME's verifier-of-record | |
-| `register_verifier` | **Admin** | | Requires staking token transfer |
-| `remove_verifier` | **Admin** | | Returns stake; slashing may apply |
+| `register_verifier` | **Admin** | | Requires staking token transfer; grants Verifier role in access_control |
+| `remove_verifier` | **Admin** | | Returns stake; revokes Verifier role in access_control |
+| `set_access_control` | **Admin** | | Wires access_control contract address |
+| `get_access_control` | Permissionless | Read-only | Returns configured access_control address |
 | `set_debtor_score` | **Verifier** | MIN_SCORE_UPDATE_INTERVAL cooldown | Max 50 verifiers per debtor |
 | `get_debtor_score` | Permissionless | Read-only | Aggregates from active verifiers |
 | `set_credit_limit` | **Verifier** (assigned to SME) | Must be SME's verifier-of-record | |
@@ -158,7 +160,7 @@ fn require_admin(&env, caller: &Address) -> Result<(), AccessControlError> {
 | `set_marketplace` | **Admin** | | For auto-compound routing |
 | `set_auto_compound` | **Investor (Self)** | | Opt-in to reinvestment |
 | `release_funds` | **Marketplace Contract** | Caller must be marketplace; invoice fully funded | Transfers pool to SME |
-| `record_position` | **Admin** (Marketplace) | Blocks if positions ≥ MAX_POSITIONS_PER_POOL (100) | DoS protection |
+| `record_position` | **Admin** (Marketplace) | Not paused; invoice not frozen; blocks if positions ≥ MAX_POSITIONS_PER_POOL (100) | DoS protection & freeze guard |
 | `repay_partial` | **SME (invoice owner)** | Invoice not frozen; no reentrancy lock | |
 | `repay` | **SME (invoice owner)** | Invoice not frozen; no reentrancy lock | Full or installment repayment |
 | `net_settle` | **SME (payer)** | All invoices belong to payer; ≤ MAX_NETTING_INVOICES (10) | Cross-invoice netting |
@@ -364,23 +366,112 @@ When adding a new public function to any contract:
 4. ☑️ Run `cargo xtask check-access-matrix` locally before commit
 5. ☑️ Document any conditional authorization (pause, state, multisig)
 
+**Adding a new contract to `scripts/deploy.sh`?** Also add all its `pub fn` rows below (issues #917).
+
 **Undocumented New Entrypoint = CI Failure**
 
 The automated checker flags any `pub fn` not present in this matrix as an error, forcing developers to consciously decide and document authorization requirements.
 
 ---
 
+### 9. secondary_market (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | Sets admin, financing_pool, treasury, fee |
+| `pause` | **Admin** | | Halts all market operations |
+| `unpause` | **Admin** | | Resumes market operations |
+| `update_protocol_fee_bps` | **Admin** | fee ≤ 1000 bps | |
+| `list_position` | **Investor (Self)** | Not paused; seller holds the position | Creates sale offer |
+| `buy_position` | **Buyer (Self)** | Not paused; listing exists; buyer ≠ seller | CEI: clear listing before transfers |
+| `cancel_listing` | **Seller (Self)** | Listing exists | Removes offer |
+
+---
+
+### 10. fractionalizer (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `wrap` | **Position Owner (Self)** | Caller holds the position | Tokenises position into shares |
+| `transfer_shares` | **Share Owner (Self)** | | OTC share transfer |
+| `settle` | **Admin** | | Distributes proceeds to all shareholders |
+| `redeem` | **Share Owner (Self)** | Settlement completed | Withdraws pro-rata proceeds |
+| `unwrap` | **Original Owner (Self)** | All shares still held by wrapper | Reverses fractionalisation |
+| `get_wrap` | Permissionless | Read-only | |
+| `get_share_balance` | Permissionless | Read-only | |
+
+---
+
+### 11. dispute_escrow (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | Sets admin and pool |
+| `open_dispute` | **Challenger (Self)** | Invoice funded; no existing dispute | |
+| `resolve_dispute` | **Admin** | Dispute open | Releases/returns escrow funds |
+| `resolve_timeout` | **Anyone** | Dispute window elapsed | Permissionless timeout resolution |
+| `get_dispute` | Permissionless | Read-only | |
+
+---
+
+### 12. governance_voting (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `set_voting_weight` | **Admin** | | Sets stake weight for an address |
+| `get_voting_weight` | Permissionless | Read-only | |
+| `delegate` | **Voter (Self)** | Caller has voting weight | Standing delegation |
+| `revoke_delegation` | **Voter (Self)** | Delegation exists | |
+| `get_delegate` | Permissionless | Read-only | |
+| `create_proposal` | **Voter (Self)** | Stake ≥ min_stake | |
+| `vote` | **Voter (Self)** | Proposal active; not already voted | |
+| `get_proposal` | Permissionless | Read-only | |
+| `get_vote_record` | Permissionless | Read-only | |
+| `execute_proposal` | **Admin** | Passed; timelock elapsed | |
+
+---
+
+### 13. referral_rewards (added by issue #917)
+
+| Entrypoint | Required Role | Conditional Authorization | Notes |
+|------------|---------------|---------------------------|-------|
+| `initialize` | None (one-time) | | |
+| `deposit` | **Admin** | | Loads reward pool |
+| `claim_referral_reward` | **SME (Self)** | Eligible; not yet claimed | |
+| `has_claimed` | Permissionless | Read-only | |
+| `paid_total` | Permissionless | Read-only | |
+
+---
+
+## Contributor Guide: Adding New Matrix Rows
+
+When you add a new `pub fn` to any contract in `contracts/` **or** add a new contract to `scripts/deploy.sh`:
+
+1. Add the row to this file under the appropriate contract section.
+2. Run `cargo run -p kora-xtask --bin check-access-matrix` locally to verify no drift.
+3. The CI `access-matrix-check` job will block the PR if the row is missing.
+
+Naming convention for the `contracts` column: use the snake_case crate directory name (e.g. `secondary_market`, not `kora-secondary-market`).
+
+---
+
 ## Security Audit Trail
 
-**Last Full Audit:** 2026-09-28 (this wave)
+**Last Full Audit:** 2026-10-17 (issue #915, #916, #917, #918 wave)
 
 **Changes Since Last Audit:**
 - Added `MAX_POSITIONS_PER_POOL` bound in `financing_pool.record_position`
 - Added `max_rate_change` guard in `price_oracle.set_price`
 - Added `MAX_NETTING_INVOICES` bound in `financing_pool.net_settle`
 - Added `MAX_VERIFIERS_PER_DEBTOR` bound in `risk_registry.set_debtor_score`
+- **Issue #915:** Re-validate multisig voters against live signer set at execution time; stale votes from removed signers are discarded and do not count toward threshold; `stale_votes_discarded` event emitted.
+- **Issue #916:** `transfer_admin` returns `DirectCallProhibited` when multisig is configured; admin transfer must go through `propose_action(TransferAdmin) → approve_action → execute_action`.
+- **Issue #917:** `check_access_matrix` xtask extended to cover `secondary_market`, `fractionalizer`, `dispute_escrow`, `governance_voting`, `referral_rewards`; CI job `access-matrix-check` added to `.github/workflows/ci.yml`.
+- **Issue #918:** Fuzz harness for `secondary_market::buy_position` CEI ordering added in `contracts/fuzz`.
 
-**Known Authorization Gaps:** None as of 2026-09-28.
+**Known Authorization Gaps:** None as of 2026-10-17.
 
 ---
 

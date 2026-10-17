@@ -68,6 +68,8 @@ pub enum InvoiceNftError {
     MintRateLimitExceeded = 24,
     InvalidParameterValue = 25,
     InvalidMigrationTarget = 26,
+    InvalidReferrer = 27,
+    ReferralAlreadyLocked = 28,
 }
 
 impl From<kora_shared::migration::MigrationError> for InvoiceNftError {
@@ -246,6 +248,8 @@ pub enum DataKey {
     MetadataCidHistory(u64),
     /// Invoice ID of the first invoice ever minted by an SME (set once, never updated).
     FirstMint(Address),
+    /// Referrer attributed to an SME on their first mint.
+    SmeReferrer(Address),
 
     // ── Legacy (migration only) ───────────────────────────────────────────────
     /// v1/v2 full Invoice struct — read during migrate() v2→v3, then removed.
@@ -684,6 +688,90 @@ impl InvoiceNftContract {
 
         events::invoice_created(&env, id, &sme, amount, currency);
         Ok(id)
+    }
+
+    /// Mint a new invoice NFT with an optional referral attribution.
+    pub fn mint_invoice_with_referrer(
+        env: Env,
+        sme: Address,
+        debtor_hash: Bytes,
+        amount: i128,
+        currency: Symbol,
+        due_date: u64,
+        ipfs_cid: String,
+        risk_score: u32,
+        notes: Option<String>,
+        referrer: Option<Address>,
+    ) -> Result<u64, InvoiceNftError> {
+        let first_key = DataKey::FirstMint(sme.clone());
+        let has_first_mint = env.storage().persistent().has(&first_key);
+
+        if let Some(ref ref_addr) = referrer {
+            if ref_addr == &sme {
+                return Err(InvoiceNftError::InvalidReferrer);
+            }
+            if ref_addr == &env.current_contract_address() {
+                return Err(InvoiceNftError::InvalidReferrer);
+            }
+            if has_first_mint {
+                return Err(InvoiceNftError::ReferralAlreadyLocked);
+            }
+
+            // Cycle detection: traverse referrer chain up to 32 hops
+            let mut curr = ref_addr.clone();
+            let mut hops = 0;
+            while hops < 32 {
+                if curr == sme {
+                    return Err(InvoiceNftError::InvalidReferrer);
+                }
+                if let Some(next_ref) = env
+                    .storage()
+                    .persistent()
+                    .get::<_, Address>(&DataKey::SmeReferrer(curr.clone()))
+                {
+                    curr = next_ref;
+                    hops += 1;
+                } else {
+                    break;
+                }
+            }
+            if hops >= 32 {
+                return Err(InvoiceNftError::InvalidReferrer);
+            }
+        }
+
+        let id = Self::mint_invoice(
+            env.clone(),
+            sme.clone(),
+            debtor_hash,
+            amount,
+            currency,
+            due_date,
+            ipfs_cid,
+            risk_score,
+            notes,
+        )?;
+
+        if !has_first_mint {
+            if let Some(ref_addr) = referrer {
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::SmeReferrer(sme.clone()), &ref_addr);
+                Self::bump_persistent(&env, &DataKey::SmeReferrer(sme.clone()));
+            }
+        }
+
+        Ok(id)
+    }
+
+    /// Returns the first-mint referrer for an SME, or None if not set.
+    pub fn get_sme_referrer(env: Env, sme: Address) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::SmeReferrer(sme))
+    }
+
+    /// Returns the invoice ID of an SME's first mint, or None if none minted.
+    pub fn get_first_mint(env: Env, sme: Address) -> Option<u64> {
+        env.storage().persistent().get(&DataKey::FirstMint(sme))
     }
 
     pub fn mint_invoices_batch(

@@ -12,6 +12,7 @@ import { JobStore } from "./jobStore";
 import { Dispatcher } from "./dispatcher";
 import { Scheduler } from "./scheduler";
 import { KeeperConfig } from "./types";
+import { ListingTtlKeeper } from "./ttlKeeper";
 import pino from "pino";
 
 const logger = pino({ name: "keeper" });
@@ -27,6 +28,10 @@ function loadConfig(): KeeperConfig {
     networkPassphrase:
       process.env.STELLAR_NETWORK_PASSPHRASE ??
       "Test SDF Network ; September 2015",
+    marketplaceContractAddress: process.env.MARKETPLACE_CONTRACT_ID ?? "",
+    activeListingsUrl: process.env.KEEPER_ACTIVE_LISTINGS_URL ?? "",
+    indexerApiKey: process.env.KEEPER_INDEXER_API_KEY ?? "",
+    ttlThresholdLedgers: Number(process.env.KEEPER_TTL_THRESHOLD_LEDGERS ?? "518400"),
   };
 }
 
@@ -37,10 +42,19 @@ async function main(): Promise<void> {
     logger.error("KEEPER_SECRET env var is required");
     process.exit(1);
   }
+  if (!config.marketplaceContractAddress || !config.activeListingsUrl) {
+    logger.error("MARKETPLACE_CONTRACT_ID and KEEPER_ACTIVE_LISTINGS_URL are required");
+    process.exit(1);
+  }
+  if (!Number.isSafeInteger(config.ttlThresholdLedgers) || config.ttlThresholdLedgers <= 0) {
+    logger.error("KEEPER_TTL_THRESHOLD_LEDGERS must be a positive integer");
+    process.exit(1);
+  }
 
   const store = new JobStore(config.dbPath);
   const dispatcher = new Dispatcher(config);
-  const scheduler = new Scheduler(store, dispatcher, config);
+  const ttlKeeper = new ListingTtlKeeper(config);
+  const scheduler = new Scheduler(store, dispatcher, config, () => ttlKeeper.scan());
 
   scheduler.start();
 
@@ -61,11 +75,20 @@ async function main(): Promise<void> {
 
     if (req.url === "/metrics") {
       const counts = store.getStatusCounts();
-      const statuses = ["pending", "ready", "in_flight", "done", "dead"] as const;
+      const statuses = ["pending", "ready", "failed", "in_flight", "done", "dead"] as const;
       const metrics = [
         "# HELP kora_keeper_jobs Current keeper jobs by lifecycle status.",
         "# TYPE kora_keeper_jobs gauge",
         ...statuses.map((status) => `kora_keeper_jobs{status=\"${status}\"} ${counts[status] ?? 0}`),
+        "# HELP kora_keeper_ttl_listings_scanned_total Active listings checked for TTL risk.",
+        "# TYPE kora_keeper_ttl_listings_scanned_total counter",
+        `kora_keeper_ttl_listings_scanned_total ${ttlKeeper.getMetrics().scanned}`,
+        "# HELP kora_keeper_ttl_listings_at_risk_total Listings observed below the TTL threshold.",
+        "# TYPE kora_keeper_ttl_listings_at_risk_total counter",
+        `kora_keeper_ttl_listings_at_risk_total ${ttlKeeper.getMetrics().atRisk}`,
+        "# HELP kora_keeper_ttl_scan_errors_total Failed active-listing TTL scans.",
+        "# TYPE kora_keeper_ttl_scan_errors_total counter",
+        `kora_keeper_ttl_scan_errors_total ${ttlKeeper.getMetrics().errors}`,
       ];
       res.writeHead(200, { "Content-Type": "text/plain; version=0.0.4; charset=utf-8" });
       res.end(`${metrics.join("\n")}\n`);

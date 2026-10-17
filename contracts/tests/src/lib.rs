@@ -20,9 +20,10 @@
 
 extern crate std;
 
-use soroban_sdk::{testutils::Address as _, Address, Env, Vec};
+use soroban_sdk::{contracttype, testutils::Address as _, Address, Env, Vec};
 
 /// A single verifier actor with an associated score.
+#[contracttype]
 #[derive(Clone)]
 pub struct Verifier {
     pub address: Address,
@@ -30,6 +31,7 @@ pub struct Verifier {
 }
 
 /// A single signer actor with an availability flag.
+#[contracttype]
 #[derive(Clone)]
 pub struct Signer {
     pub address: Address,
@@ -38,6 +40,7 @@ pub struct Signer {
 }
 
 /// A single SME actor with a set of concurrent invoice ids.
+#[contracttype]
 #[derive(Clone)]
 pub struct Sme {
     pub address: Address,

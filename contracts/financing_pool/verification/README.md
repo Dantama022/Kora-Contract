@@ -50,7 +50,7 @@ count.  Simplifying assumptions are documented below.
 | A4 | No installment schedule | Installment schedules change *timing* of repayment but not the invariants over the final closed state |
 | A5 | Late penalty treasury split is 0 | The split path is a pure arithmetic re-distribution; setting split=0 tests the investor path in isolation |
 | A6 | `share_bps` values are derived from integer division of `contributed/total_pool` | Matches the contract implementation exactly |
-| A7 | I4/I5 partial-repayment model uses `total_owed = face_value` (no late penalty) | The late-penalty path adds a constant to `total_owed`; I5's overpayment check is parameterized on `total_owed` so this assumption is conservative |
+| A7 | I4/I5 partial-repayment model uses `total_owed = face_value` (no late penalty) | The late-penalty path adds a constant to `total_owed`; I5's overpayment check is parameterized on `total_owed` so this assumption is conservative.  Late penalty bps is read from `parameter_registry` at enforcement time (issue #968), but the bounded model already assumes no penalty — the registry addition does not affect its reachable states. |
 | A8 | Multi-asset model checks I4/I5 on two independent pools; cross-pool balance leakage is not modelled | `AggregateFunded` tracking is omitted from the model; leakage is prevented by storage-key isolation (each pool has a unique `DataKey::Pool(invoice_id)`) |
 
 ## Violations Found and Remediated

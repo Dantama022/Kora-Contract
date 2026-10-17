@@ -33,6 +33,12 @@
 #![cfg(test)]
 
 use kora_financing_pool::{FinancingPoolContract, FinancingPoolContractClient, FinancingPoolError};
+use kora_governance_voting::{
+    GovernanceVotingContract, GovernanceVotingContractClient, GovernanceError,
+    ProposalType as GovernanceVotingProposalType,
+    VoteChoice as GovernanceVotingVoteChoice,
+    VotingMode as GovernanceVotingVotingMode,
+};
 use kora_invoice_nft::{InvoiceNftContract, InvoiceNftContractClient, InvoiceNftError};
 use kora_marketplace::{MarketplaceContract, MarketplaceContractClient};
 use kora_secondary_market::{SecondaryMarket, SecondaryMarketClient, SecondaryMarketError};
@@ -41,6 +47,7 @@ use kora_shared::{
     types::{RiskTier},
 };
 use kora_treasury::{TreasuryContract, TreasuryContractClient, TreasuryError};
+use kora_vesting::{VestingContract, VestingContractClient, VestingError};
 use soroban_sdk::{
     testutils::{Address as _, AuthorizedFunction, AuthorizedInvocation},
     token, Address, BytesN, Env, IntoVal, String, Symbol,
@@ -518,6 +525,137 @@ fn test_anyone_can_read_invoice_state() {
 }
 
 // ============================================================================
+// Test Suite 8: Vesting → Governance Voting Boundaries
+// ============================================================================
+
+#[test]
+fn test_governance_can_read_vested_balance() {
+    let t = setup();
+
+    let beneficiary = Address::generate(&t.env);
+
+    // Deploy vesting contract
+    let vesting_addr = t.env.register_contract(None, VestingContract);
+    let vesting = VestingContractClient::new(&t.env, &vesting_addr);
+
+    // Initialize vesting with token
+    let token_admin = Address::generate(&t.env);
+    let token_addr = t.env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token = token::Client::new(&t.env, &token_addr);
+    vesting.initialize(&t.admin, &token_addr);
+    token.mint(&vesting_addr, &10_000);
+
+    // Create grant
+    let start_time = t.env.ledger().timestamp();
+    vesting.create_grant(&t.admin, &beneficiary, &10_000, &start_time, &100, &1000);
+
+    // Deploy governance voting contract
+    let gov_addr = t.env.register_contract(None, GovernanceVotingContract);
+    let gov = GovernanceVotingContractClient::new(&t.env, &gov_addr);
+    gov.initialize(&t.admin, &t.access_control);
+
+    // Set vesting contract on governance
+    gov.set_vesting_contract(&t.admin, &vesting_addr);
+
+    // Before cliff: weight is 0
+    let weight = gov.get_voting_weight(&beneficiary);
+    assert_eq!(weight, 0, "Weight should be 0 before cliff");
+
+    // After some vesting: weight equals vested balance
+    let half_time = start_time + 500;
+    t.env.ledger().with_mut(|li| li.timestamp = half_time);
+    let vesting_weight = gov.get_voting_weight(&beneficiary);
+    assert_eq!(vesting_weight, 5000, "Weight should equal vested balance at snapshot");
+}
+
+#[test]
+fn test_governance_rejects_vote_when_vesting_unset() {
+    let t = setup();
+
+    // Deploy governance voting contract WITHOUT setting vesting
+    let gov_addr = t.env.register_contract(None, GovernanceVotingContract);
+    let gov = GovernanceVotingContractClient::new(&t.env, &gov_addr);
+    gov.initialize(&t.admin, &t.access_control);
+
+    // Create a proposal so the vote checks pass the proposal existence check
+    let voter = Address::generate(&t.env);
+    let now = t.env.ledger().timestamp();
+    gov.create_proposal(
+        &voter,
+        &String::from_str(&t.env, "Test Proposal"),
+        &String::from_str(&t.env, "Description"),
+        &GovernanceVotingProposalType::ParameterChange,
+        &GovernanceVotingVotingMode::Standard,
+        &1i128,        // quorum
+        &(now + 3600), // duration (1 hour)
+    );
+
+    // Try to vote — Should fail because no manual weight is set and vesting is not configured
+    // The fallback to manual weight returns 0, which is InsufficientVotingWeight
+    let result = gov.try_vote(
+        &voter,
+        &1u64,
+        &GovernanceVotingVoteChoice::For,
+        &100i128,
+    );
+    assert!(result.is_err(), "Vote should fail when no weight source is available (no vesting, no manual weight)");
+}
+
+#[test]
+fn test_vesting_readable_by_any_contract() {
+    let t = setup();
+
+    let beneficiary = Address::generate(&t.env);
+
+    // Deploy vesting contract
+    let vesting_addr = t.env.register_contract(None, VestingContract);
+    let vesting = VestingContractClient::new(&t.env, &vesting_addr);
+
+    let token_admin = Address::generate(&t.env);
+    let token_addr = t.env.register_stellar_asset_contract_v2(token_admin.clone());
+    let token = token::Client::new(&t.env, &token_addr);
+    vesting.initialize(&t.admin, &token_addr);
+    token.mint(&vesting_addr, &10_000);
+
+    let start_time = t.env.ledger().timestamp();
+    vesting.create_grant(&t.admin, &beneficiary, &10_000, &start_time, &100, &1000);
+
+    // Random address can read vested balance (read-only view)
+    let vested = vesting.get_vested_balance(&beneficiary);
+    assert_eq!(vested, 0, "Anyone can read vested balance before cliff");
+
+    // Any address can call get_vested_balance_at (read-only, no auth)
+    let snapshot_time = start_time + 500;
+    let vested_at = vesting.get_vested_balance_at(&beneficiary, &snapshot_time);
+    assert_eq!(vested_at, 5000, "Anyone can query historical vesting snapshot");
+
+    // Release is public too — any address can trigger release for a beneficiary
+    let released = vesting.try_release(&beneficiary);
+    // Won't fail on auth since release is callable by anyone
+}
+
+#[test]
+fn test_only_admin_can_set_vesting_contract() {
+    let t = setup();
+
+    let gov_addr = t.env.register_contract(None, GovernanceVotingContract);
+    let gov = GovernanceVotingContractClient::new(&t.env, &gov_addr);
+    gov.initialize(&t.admin, &t.access_control);
+
+    let vesting_addr = Address::generate(&t.env);
+    let random_admin = Address::generate(&t.env);
+
+    // Random address setting vesting contract should fail
+    t.env.mock_all_auths_allowing_non_root_auth();
+    let result = gov.try_set_vesting_contract(&random_admin, &vesting_addr);
+    assert!(result.is_err(), "Only admin should be able to set vesting contract address");
+
+    // Admin can set vesting contract
+    let result = gov.try_set_vesting_contract(&t.admin, &vesting_addr);
+    assert!(result.is_ok(), "Admin should be able to set vesting contract address");
+}
+
+// ============================================================================
 // Coverage Summary
 // ============================================================================
 
@@ -531,13 +669,15 @@ fn test_coverage_summary() {
     println!("  ✓ Marketplace → Invoice NFT boundaries (2 tests)");
     println!("  ✓ Privilege escalation attack scenarios (3 tests)");
     println!("  ✓ Read-only function access (3 tests)");
+    println!("  ✓ Vesting → Governance Voting boundaries (4 tests)");
     println!("");
-    println!("Total: 20 test cases covering:");
+    println!("Total: 24 test cases covering:");
     println!("  - Authorized caller enforcement");
     println!("  - Unauthorized caller rejection");
     println!("  - Cross-contract privilege boundaries");
     println!("  - Attack scenario prevention");
     println!("  - Read vs. write access separation");
+    println!("  - Vesting-based vote weight computation");
     println!("");
     println!("Result: Cross-contract authorization boundaries verified");
 }

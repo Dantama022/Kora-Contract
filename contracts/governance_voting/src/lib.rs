@@ -2,7 +2,7 @@
 
 use kora_shared::errors::CommonError;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, Address, Env, String, Vec,
+    contract, contracterror, contractimpl, contracttype, vec, Address, Env, Option, String, Symbol, Vec,
 };
 
 // ── Errors ────────────────────────────────────────────────────────────────────
@@ -28,6 +28,8 @@ pub enum GovernanceError {
     QuadraticVotingNotAllowed = 15,
     DelegationNotFound = 16,
     Reentrancy = 17,
+    VestingNotConfigured = 18,
+    VestingContractError = 19,
 }
 
 impl From<CommonError> for GovernanceError {
@@ -70,6 +72,8 @@ pub enum DataKey {
     DelegatedBy(Address),
     /// Voting weight/stake for an address
     VotingWeight(Address),
+    /// Vesting contract address for vested-balance weight computation
+    Vesting,
     /// Reentrancy guard
     ReentrancyLock,
 }
@@ -217,16 +221,50 @@ impl GovernanceVotingContract {
         Ok(())
     }
 
-    /// Get voting weight for an address (includes delegated weight if the address is a delegate)
+    /// Set the vesting contract address (admin only).
+    ///
+    /// Once set, vote weight is computed from the beneficiary's vested balance
+    /// at the proposal's `created_at` snapshot timestamp, instead of using the
+    /// manually set `VotingWeight` storage.
+    ///
+    /// **Parameters:**
+    /// - `admin` — Admin address
+    /// - `vesting_address` — The vesting contract address
+    ///
+    /// **Security:** Requires `admin.require_auth()`
+    pub fn set_vesting_contract(
+        env: Env,
+        admin: Address,
+        vesting_address: Address,
+    ) -> Result<(), GovernanceError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+
+        kora_shared::validation::require_not_self(&env, &vesting_address)?;
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Vesting, &vesting_address);
+        Self::bump_persistent(&env, &DataKey::Vesting);
+
+        Ok(())
+    }
+
+    /// Get the vesting contract address, or None if not configured.
+    pub fn get_vesting_contract(env: Env) -> Option<Address> {
+        env.storage().persistent().get(&DataKey::Vesting)
+    }
+
+    /// Get voting weight for an address (includes delegated weight if the address is a delegate).
+    ///
+    /// When a vesting contract is configured, the base weight is the beneficiary's
+    /// vested balance as of the current ledger timestamp. Otherwise it falls back
+    /// to the manually set `VotingWeight` storage.
     ///
     /// **Returns:** Total voting weight (own weight + delegated weight)
     pub fn get_voting_weight(env: Env, address: Address) -> i128 {
-        // Get base weight
-        let base_weight: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::VotingWeight(address.clone()))
-            .unwrap_or(0);
+        // Get base weight — from vesting contract if configured, otherwise from storage
+        let base_weight = Self::get_base_weight(&env, &address);
 
         // Get delegated weight if this address is a delegate
         let delegated_weight = Self::get_delegated_weight(&env, &address);
@@ -458,12 +496,8 @@ impl GovernanceVotingContract {
             return Err(GovernanceError::AlreadyVoted);
         }
 
-        // Get voter's base voting weight
-        let base_weight: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::VotingWeight(voter.clone()))
-            .unwrap_or(0);
+        // Get voter's base voting weight — from vesting contract if configured
+        let base_weight = Self::get_base_weight_at_snapshot(&env, &voter, proposal.created_at)?;
 
         if base_weight <= 0 {
             return Err(GovernanceError::InsufficientVotingWeight);
@@ -527,6 +561,41 @@ impl GovernanceVotingContract {
 
         env.storage().persistent().set(&proposal_key, &proposal);
         Self::bump_persistent(&env, &proposal_key);
+
+        // ── Emit vote event with weight basis ──────────────────────────────────
+        //
+        // Topics:
+        //   "voteCast"  — event discriminator
+        //   "SCHEMA_V"  — schema version (stable across all events)
+        //
+        // Fields (tuple):
+        //   [0] proposal_id  (u64)
+        //   [1] voter        (Address)
+        //   [2] weight       (i128) — the effective weight used
+        //   [3] voice_credits (i128)
+        //   [4] choice       (u32 — 0=For,1=Against,2=Abstain)
+        //   [5] snapshot_at  (u64) — proposal.created_at snapshot timestamp
+        //   [6] schema_v     (u32)
+        {
+            let topics = vec![
+                Symbol::new(&env, "voteCast"),
+                Symbol::new(&env, "SCHEMA_V"),
+            ];
+            let data = vec![
+                proposal_id.into_val(&env),
+                voter.into_val(&env),
+                effective_weight.into_val(&env),
+                credits_spent.into_val(&env),
+                (match choice {
+                    VoteChoice::For => 0u32,
+                    VoteChoice::Against => 1u32,
+                    VoteChoice::Abstain => 2u32,
+                }).into_val(&env),
+                proposal.created_at.into_val(&env),
+                kora_shared::events::EVENT_SCHEMA_VERSION.into_val(&env),
+            ];
+            env.events().publish(topics, data);
+        }
 
         Ok(())
     }
@@ -608,6 +677,70 @@ impl GovernanceVotingContract {
 
     // ── Internal Helpers ──────────────────────────────────────────────────────
 
+    /// Get the base (own) weight for an address without delegated weight.
+    ///
+    /// When a vesting contract is configured, the base weight is the beneficiary's
+    /// vested balance at the current ledger timestamp. Otherwise it reads from the
+    /// manually set `VotingWeight` storage.
+    fn get_base_weight(env: &Env, address: &Address) -> i128 {
+        let vesting_address: Option<Address> = env.storage().persistent().get(&DataKey::Vesting);
+
+        if let Some(vesting_addr) = vesting_address {
+            // Read current vested balance from vesting contract
+            let now = env.ledger().timestamp();
+            let result: i128 = env.invoke_contract(
+                &vesting_addr,
+                &Symbol::new(env, "get_vested_balance_at"),
+                vec![
+                    env,
+                    address.clone().into_val(env),
+                    now.into_val(env),
+                ],
+            );
+            result
+        } else {
+            // Fall back to manually set weight
+            env.storage()
+                .persistent()
+                .get(&DataKey::VotingWeight(address.clone()))
+                .unwrap_or(0)
+        }
+    }
+
+    /// Get the base weight at a specific snapshot timestamp (from vesting if
+    /// configured, otherwise falls back to the manual `VotingWeight` storage).
+    ///
+    /// When a vesting contract is configured, calls `get_vested_balance_at` to
+    /// compute the beneficiary's vested balance at the given snapshot time.
+    /// Otherwise reads the manually set weight (backward-compatible fallback).
+    fn get_base_weight_at_snapshot(
+        env: &Env,
+        address: &Address,
+        snapshot_at: u64,
+    ) -> Result<i128, GovernanceError> {
+        let vesting_address: Option<Address> = env.storage().persistent().get(&DataKey::Vesting);
+
+        if let Some(vesting_addr) = vesting_address {
+            let result: i128 = env.invoke_contract(
+                &vesting_addr,
+                &Symbol::new(env, "get_vested_balance_at"),
+                vec![
+                    env,
+                    address.clone().into_val(env),
+                    snapshot_at.into_val(env),
+                ],
+            );
+            Ok(result)
+        } else {
+            // Fall back to manually set weight (backward compatible)
+            let weight: i128 = env.storage()
+                .persistent()
+                .get(&DataKey::VotingWeight(address.clone()))
+                .unwrap_or(0);
+            Ok(weight)
+        }
+    }
+
     fn require_admin(env: &Env, admin: &Address) -> Result<(), GovernanceError> {
         let stored_admin: Address = env
             .storage()
@@ -640,12 +773,7 @@ impl GovernanceVotingContract {
         let mut total_weight: i128 = 0;
 
         for delegator in delegators.iter() {
-            let weight: i128 = env
-                .storage()
-                .persistent()
-                .get(&DataKey::VotingWeight(delegator))
-                .unwrap_or(0);
-
+            let weight = Self::get_base_weight(env, &delegator);
             total_weight = total_weight.saturating_add(weight);
         }
 
