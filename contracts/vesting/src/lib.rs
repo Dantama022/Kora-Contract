@@ -90,7 +90,25 @@ impl VestingContract {
         Ok(())
     }
 
-    /// Create a new vesting grant for a beneficiary.
+    /// Create a new vesting grant for a beneficiary. Admin only.
+    ///
+    /// **Parameters:**
+    /// - `admin` — Must be the current admin address.
+    /// - `beneficiary` — The address that will receive vested tokens.
+    /// - `total_amount` — Total tokens to vest (must be > 0).
+    /// - `start_time` — Unix timestamp when vesting starts.
+    /// - `cliff_duration` — Duration in seconds before first vest.
+    /// - `vesting_duration` — Total vesting duration in seconds (including cliff).
+    ///
+    /// **Errors:**
+    /// - `VestingError::NotAdmin` — Caller is not the admin.
+    /// - `VestingError::InvalidAmount` — total_amount ≤ 0.
+    /// - `VestingError::InvalidSchedule` — vesting_duration ≤ cliff_duration.
+    /// - `VestingError::GrantAlreadyExists` — A grant already exists for this beneficiary.
+    /// - `VestingError::InvalidAddress` — beneficiary is contract address.
+    ///
+    /// **Security:** Requires `admin.require_auth()`. Tokens must be transferred
+    /// to contract separately before creating grants.
     pub fn create_grant(
         env: Env,
         admin: Address,
@@ -114,44 +132,8 @@ impl VestingContract {
 
         let key = DataKey::Grant(beneficiary.clone());
         if env.storage().persistent().has(&key) {
-            return Err(
-    /// Create a new vesting grant for a beneficiary. Admin only.
-    ///
-    /// **Parameters:**
-    /// - `admin` — Must be the current admin address.
-    /// - `beneficiary` — The address that will receive vested tokens.
-    /// - `total_amount` — Total tokens to vest (must be > 0).
-    /// - `start_time` — Unix timestamp when vesting starts.
-    /// - `cliff_duration` — Duration in seconds before first vest.
-    /// - `vesting_duration` — Total vesting duration in seconds (including cliff).
-    ///
-    /// **Errors:**
-    /// - `VestingError::NotAdmin` — Caller is not the admin.
-    /// - `VestingError::InvalidAmount` — total_amount ≤ 0.
-    /// - `VestingError::InvalidVestingSchedule` — vesting_duration ≤ cliff_duration.
-    /// - `VestingError::InvalidAddress` — beneficiary is contract address.
-    ///
-    /// **Security:** Requires `admin.require_auth()`. Tokens must be transferred
-    /// to contract separately before creating grants.
-    pub fn create_grant(
-        env: Env,
-        admin: Address,
-        beneficiary: Address,
-        total_amount: i128,
-        start_time: u64,
-        cliff_duration: u64,
-        vesting_duration: u64,
-    ) -> Result<(), VestingError> {
-        admin.require_auth();
-        Self::require_admin(&env, &admin)?;
-
-        if total_amount <= 0 {
-            return Err(VestingError::InvalidAmount);
+            return Err(VestingError::GrantAlreadyExists);
         }
-        if vesting_duration <= cliff_duration {
-            return Err(VestingError::InvalidVestingSchedule);
-        }
-        kora_shared::validation::require_not_self(&env, &beneficiary)?;
 
         let grant = VestingGrant {
             beneficiary: beneficiary.clone(),
@@ -161,10 +143,9 @@ impl VestingContract {
             cliff_duration,
             vesting_duration,
             revoked: false,
-            revoked_at: 0,
+            revoked_at: None,
         };
 
-        let key = DataKey::Grant(beneficiary.clone());
         env.storage().persistent().set(&key, &grant);
         Self::bump_persistent(&env, &key);
 
@@ -253,7 +234,7 @@ impl VestingContract {
         }
 
         grant.revoked = true;
-        grant.revoked_at = env.ledger().timestamp();
+        grant.revoked_at = Some(env.ledger().timestamp());
 
         env.storage().persistent().set(&key, &grant);
         Self::bump_persistent(&env, &key);
@@ -393,7 +374,7 @@ impl VestingContract {
     fn calculate_vested(env: &Env, grant: &VestingGrant) -> Result<i128, VestingError> {
         let now = env.ledger().timestamp();
         let effective_time = if grant.revoked {
-            grant.revoked_at
+            grant.revoked_at.unwrap_or(now)
         } else {
             now
         };
@@ -565,7 +546,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "VestingError(InvalidVestingSchedule)")]
+    #[should_panic(expected = "VestingError(InvalidSchedule)")]
     fn test_invalid_schedule_cliff_equals_duration() {
         let env = Env::default();
         env.mock_all_auths();

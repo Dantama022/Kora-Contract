@@ -45,6 +45,6 @@ See **[docs/BUG_BOUNTY_OPERATIONS.md](docs/BUG_BOUNTY_OPERATIONS.md)** for full 
 ### Additional Resources
 
 - **Security Model:** [docs/SECURITY.md](docs/SECURITY.md)
-- **Access Control Matrix:** [docs/ACCESS_MATRIX.md](docs/ACCESS_MATRIX.md)
+- **Access Control Matrix:** [docs/ACCESS_MATRIX.md](docs/ACCESS_MATRIX.md) — every public entrypoint across all contracts mapped to its required role; enforced in CI by `check_access_matrix`, which parses the matrix as the single source of truth
 - **Oracle Defense Testing:** [docs/ORACLE_ADVERSARIAL_TESTING.md](docs/ORACLE_ADVERSARIAL_TESTING.md)
 - **Loop Bounds Audit:** [docs/LOOP_BOUNDS_AUDIT.md](docs/LOOP_BOUNDS_AUDIT.md)

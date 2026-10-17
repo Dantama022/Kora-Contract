@@ -16,6 +16,10 @@ path = "src/bin/upgrade_coordinator.rs"
 name = "wasm-metrics"
 path = "src/bin/wasm_metrics.rs"
 
+[[bin]]
+name = "check_access_matrix"
+path = "src/bin/check_access_matrix.rs"
+
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

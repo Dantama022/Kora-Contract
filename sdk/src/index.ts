@@ -10,6 +10,8 @@ export {
   PriceOracleClient,
   RiskRegistryClient,
   TreasuryClient,
+  metadataHashToBytes,
+  optionalString,
 } from "./clients";
 export { TESTNET, MAINNET } from "./base";
 export { TransactionOutcomeUnknownError } from "./transactionRecovery";

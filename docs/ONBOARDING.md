@@ -99,6 +99,20 @@ by the #912/#911 onboarding change; verification was restricted to static review
   CI fails the build otherwise (see [`CONTRIBUTING.md` § Style
   Guide](../CONTRIBUTING.md#style-guide)).
 
+- If you're adding or changing a public contract entrypoint (`pub fn` in a
+  `#[contractimpl]` block), add the matching row to
+  [`docs/ACCESS_MATRIX.md`](ACCESS_MATRIX.md) in the same change, then run:
+
+  ```bash
+  cargo run -p kora-xtask --bin check_access_matrix
+  ```
+
+  The checker parses the matrix tables from that file (no hardcoded copy —
+  the markdown is the single source of truth), supports
+  `--contract <name>` and `--verbose`, and CI fails the build on any drift
+  or undocumented entrypoint. See the "New Entrypoint Checklist" in
+  [`docs/ACCESS_MATRIX.md`](ACCESS_MATRIX.md).
+
 ---
 
 ## 2. Making Your First Contribution

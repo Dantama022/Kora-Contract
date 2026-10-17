@@ -62,3 +62,23 @@ npm test   # 90% line/branch/function/statement coverage enforced
 
 Covers dual-provider success, partial-failure degradation, integrity-mismatch
 rejection, and periodic re-pin-on-failure + alerting.
+
+## REST API surface (consumed by `apps/web` — Issue #1001)
+
+The web invoice wizard talks to this service through `apps/web/src/services/ipfsPinningClient.ts`:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/pins` | Upload + redundant pin. Raw bytes as body; `X-Filename`, `X-SHA256` (client-computed digest), `X-Content-Type`, `X-PII-Handled` headers. Responds with the `PinResult` JSON (content-derived CID, `sha256Hex`, per-provider outcomes, `degraded`). |
+| `GET` | `/pins/:cid` | Pin status polling (`pinned` / `degraded` / `failed` / `repinned`). |
+| `GET` | `/pins/:cid/content` | Pinned bytes — used by the wizard to re-hash content before mint (issue #1002). |
+| `GET` | `/pins/:cid/verify` | Service-side verification (`{ cid, verified, sha256Hex }`). |
+
+Errors are returned as `{"error": "<CODE>", "message": "...", "providers": [...]}`
+with codes mirroring the pipeline (`FILE_TOO_LARGE`, `EMPTY_FILE`,
+`UNSUPPORTED_TYPE`, `UNSUPPORTED_EXTENSION`, `INTEGRITY_MISMATCH`,
+`PII_NOT_HANDLED`, `PIN_FAILED`). Duplicate pins of the same content hash are
+idempotent: the CID is SHA-256-derived and the pin record is upserted.
+
+Client configuration: set `VITE_IPFS_PINNING_URL` in `apps/web` (see
+`apps/web/README.md`).

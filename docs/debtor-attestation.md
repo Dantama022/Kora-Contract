@@ -65,6 +65,36 @@ The marketplace consults `attestation_status ` at listing time. Listing requirem
 
 The invoice NFT exposes a read-only status check that the marketplace consumes. The attestation contract address is configured on the invoice NFT contract during initialization.
 
+## Invoice Metadata Pipeline (Issues #1001, #1002)
+
+The debtor attestation verifies *who* confirmed the invoice; the metadata
+pipeline guarantees *what* was confirmed never silently changed. The document
+commitment chain is:
+
+1. **Upload** — the SME submits invoice document bytes in the web submission
+   wizard. The wizard computes SHA-256 over the exact bytes with Web Crypto
+   and rejects empty files before this step.
+2. **Pin** — bytes are uploaded to `services/ipfs-pinning`
+   (`apps/web/src/services/ipfsPinningClient.ts`, configured via
+   `VITE_IPFS_PINNING_URL`), which hash-verifies the claimed digest **before**
+   pinning, pins across ≥2 providers, and persists a pin-status record. The
+   returned CID is the content-derived digest.
+3. **Verify** — the wizard re-fetches the pinned bytes
+   (`GET /pins/:cid/content`) and re-computes the SHA-256, mirroring the
+   pinning service's `verifier.ts` client-side. Gateway or pinning-service
+   content swaps fail **closed**: the mint step stays disabled while the
+   computed hash differs from the hash the user confirmed on the review step.
+4. **Commit** — the validated 32-byte SHA-256 is passed to the SDK mint
+   channel as `metadata_hash: Bytes` (`invoice_nft::commit_metadata_hash`
+   for the freshly minted invoice; raw digest bytes, hex displayed to the
+   user). This is the same on-chain commitment audited by
+   `flag_metadata_mismatch` / `resolve_metadata_dispute`.
+
+The debtor attestation record therefore attests a borrower whose document is
+anchored by an immutable on-chain `metadata_hash` — a mismatch between the
+pinned IPFS document and the committed hash freezes the invoice for dispute
+resolution.
+
 ## Testing
 
 The contract is tested with a minimum of 90% coverage, including:
