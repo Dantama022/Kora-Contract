@@ -181,11 +181,24 @@ echo "  marketplace    : $MARKETPLACE_ID"
 PRICE_ORACLE_ID=$(deploy_contract "price_oracle" "$WASM_DIR/kora_price_oracle.wasm")
 echo "  price_oracle   : $PRICE_ORACLE_ID"
 
+GOVERNANCE_VOTING_ID=$(deploy_contract "governance_voting" "$WASM_DIR/kora_governance_voting.wasm")
+echo "  governance_voting: $GOVERNANCE_VOTING_ID"
+
+if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
+  DISPUTE_ESCROW_ID=$(deploy_contract "dispute_escrow" "$WASM_DIR/kora_dispute_escrow.wasm")
+  echo "  dispute_escrow : $DISPUTE_ESCROW_ID"
+fi
+
 echo ""
 echo "--- Initializing contracts (dependency order) ---"
 
 invoke "$ACCESS_CONTROL_ID" initialize --admin "$ADMIN"
 echo "  access_control initialized"
+
+invoke "$GOVERNANCE_VOTING_ID" initialize \
+  --admin "$ADMIN" \
+  --access_control "$ACCESS_CONTROL_ID"
+echo "  governance_voting initialized"
 
 invoke "$INVOICE_NFT_ID" initialize --admin "$ADMIN" --access_control "$ACCESS_CONTROL_ID"
 echo "  invoice_nft initialized"
@@ -262,7 +275,7 @@ POOL_HASH=$(sha256sum "$WASM_DIR/kora_financing_pool.wasm" | awk '{print $1}')
 MARKETPLACE_HASH=$(sha256sum "$WASM_DIR/kora_marketplace.wasm" | awk '{print $1}')
 RISK_HASH=$(sha256sum "$WASM_DIR/kora_risk_registry.wasm" | awk '{print $1}')
 PRICE_ORACLE_HASH=$(sha256sum "$WASM_DIR/kora_price_oracle.wasm" | awk '{print $1}')
-DISPUTE_RESOLUTION_HASH=$(sha256sum "$WASM_DIR/kora_dispute_resolution.wasm" | awk '{print $1}')
+GOVERNANCE_VOTING_HASH=$(sha256sum "$WASM_DIR/kora_governance_voting.wasm" | awk '{print $1}')
 ESCROW_MANIFEST_ENTRY=""
 if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
   DISPUTE_ESCROW_HASH=$(sha256sum "$WASM_DIR/kora_dispute_escrow.wasm" | awk '{print $1}')
@@ -319,9 +332,9 @@ cat > "$TEMP_MANIFEST" <<EOF
       "address": "$PRICE_ORACLE_ID",
       "wasm_hash": "$PRICE_ORACLE_HASH"
     },
-    "dispute_resolution": {
-      "address": "$DISPUTE_RESOLUTION_ID",
-      "wasm_hash": "$DISPUTE_RESOLUTION_HASH"
+    "governance_voting": {
+      "address": "$GOVERNANCE_VOTING_ID",
+      "wasm_hash": "$GOVERNANCE_VOTING_HASH"
     }
     $ESCROW_MANIFEST_ENTRY
   }

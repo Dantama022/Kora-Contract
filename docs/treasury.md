@@ -327,6 +327,12 @@ whitelisted token, a scope description, and an ordered list of positive
 milestone amounts. The request and its review/disbursement state are readable
 through `get_grant_proposal`.
 
+After a grant is reviewed, the recipient submits a 32-byte evidence hash for
+the next milestone with `submit_grant_milestone_proof`. The hash is retained
+for inspection through `get_grant_milestone_proof`. A quorum-approved
+`ReleaseGrantMilestone` action is required to accept that milestone and release
+its funds; each milestone requires its own proof.
+
 Grant activity uses the treasury multisig action path:
 
 ```
@@ -339,11 +345,11 @@ propose_treasury_action(signer, ReclaimGrant(grant_id))
 Each review, milestone release, and reclaim needs the configured signer quorum
 and the existing treasury governance timelock. Milestones are released in array
 order, one per approved action; a completed tranche cannot be paid twice. A
-grant cannot be reviewed twice or paid before review. The last outstanding
-tranche can be canceled after 90 days without grant activity; it remains in the
-treasury rather than being transferred to the recipient. The recipient receives
-only completed milestone amounts. Funds reserved for insurance are excluded
-from milestone balance checks.
+grant cannot be reviewed twice or paid before review and proof submission. The
+last outstanding tranche can be canceled after 90 days without grant activity;
+it remains in the treasury rather than being transferred to the recipient. The
+recipient receives only completed milestone amounts. Funds reserved for
+insurance are excluded from milestone balance checks.
 
 **Note:** The decimal registry does not enumerate tokens, so callers still
 provide the token and symbol lists to this view.

@@ -725,6 +725,19 @@ impl FinancingPoolContract {
         Ok(())
     }
 
+    /// Permissionlessly extend the TTL of an invoice's pool and positions entries.
+    /// Missing entries are ignored so this can be called before a pool is opened.
+    pub fn bump_pool_ttl(env: Env, invoice_id: u64) -> u32 {
+        let mut bumped = 0;
+        for key in [DataKey::Pool(invoice_id), DataKey::Positions(invoice_id)] {
+            if env.storage().persistent().has(&key) {
+                Self::bump_persistent(&env, &key);
+                bumped += 1;
+            }
+        }
+        bumped
+    }
+
     /// Update the per-investor concentration cap. Admin only.
     ///
     /// **Parameters:**
@@ -3715,6 +3728,37 @@ mod tests {
         let (env, _admin, _nft, _treasury, _ac, client) = setup();
         let investor = Address::generate(&env);
         let non_admin = Address::generate(&env);
+    #[test]
+    fn test_bump_pool_ttl_extends_existing_pool_and_positions() {
+        let (env, _admin, _nft, _treasury, _ac, client) = setup();
+        let invoice_id = 42u64;
+        let contract_id = client.address.clone();
+        seed_pool(&env, &contract_id, invoice_id, 1_000);
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .persistent()
+                .set(&DataKey::Positions(invoice_id), &soroban_sdk::Map::<Address, Position>::new(&env));
+        });
+
+        let pool_ttl_before = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Pool(invoice_id))
+        });
+        let positions_ttl_before = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Positions(invoice_id))
+        });
+
+        assert_eq!(client.bump_pool_ttl(&invoice_id), 2);
+
+        let pool_ttl_after = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Pool(invoice_id))
+        });
+        let positions_ttl_after = env.as_contract(&contract_id, || {
+            env.storage().persistent().get_ttl(&DataKey::Positions(invoice_id))
+        });
+        assert!(pool_ttl_after > pool_ttl_before);
+        assert!(positions_ttl_after > positions_ttl_before);
+        assert_eq!(client.bump_pool_ttl(&999u64), 0);
+    }
         let result = client.try_record_position(
             &non_admin,
             &1u64,

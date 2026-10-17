@@ -15,6 +15,7 @@ import { SorobanRpc, Contract, Address } from '@stellar/stellar-sdk';
 import axios, { AxiosInstance } from 'axios';
 import pino from 'pino';
 import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
 
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -37,10 +38,30 @@ interface Config {
   dbPath: string;
 }
 
+interface DeploymentManifest {
+  contracts?: {
+    governance_voting?: {
+      address?: string;
+    };
+  };
+}
+
+function governanceVotingAddressFromManifest(): string | undefined {
+  const manifestPath = process.env.KORA_DEPLOYMENT_MANIFEST;
+  if (!manifestPath) return undefined;
+
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as DeploymentManifest;
+  const address = manifest.contracts?.governance_voting?.address;
+  if (!address) {
+    throw new Error(`Deployment manifest does not contain contracts.governance_voting.address: ${manifestPath}`);
+  }
+  return address;
+}
+
 function loadConfig(): Config {
   return {
     rpcUrl: process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org',
-    governanceContractId: process.env.GOVERNANCE_CONTRACT_ID!,
+    governanceContractId: process.env.GOVERNANCE_CONTRACT_ID || governanceVotingAddressFromManifest() || '',
     forumApiUrl: process.env.FORUM_API_URL!,
     forumApiKey: process.env.FORUM_API_KEY!,
     pollIntervalMs: parseInt(process.env.POLL_INTERVAL_MS || '60000', 10),
@@ -408,7 +429,7 @@ async function main() {
   const config = loadConfig();
 
   if (!config.governanceContractId) {
-    logger.error('GOVERNANCE_CONTRACT_ID environment variable is required');
+    logger.error('Set GOVERNANCE_CONTRACT_ID or KORA_DEPLOYMENT_MANIFEST');
     process.exit(1);
   }
 
