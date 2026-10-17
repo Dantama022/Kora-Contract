@@ -33,6 +33,9 @@ SOROBAN_RPC_URL=https://soroban-testnet.stellar.org
 # Deployed governance_voting address (not governance or parameter_registry)
 GOVERNANCE_CONTRACT_ID=CXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
+# Alternatively, read contracts.governance_voting.address from the deploy output
+KORA_DEPLOYMENT_MANIFEST=../../deployments/testnet.json
+
 # Forum API credentials
 FORUM_API_URL=https://forum.example.com/api/v1
 FORUM_API_KEY=your_api_key_here
@@ -51,7 +54,10 @@ DB_PATH=./governance-sync.db
 LOG_LEVEL=info
 ```
 
-`GOVERNANCE_CONTRACT_ID` must identify the contract with the `Proposal` schema
+`GOVERNANCE_CONTRACT_ID` takes precedence. If it is unset, the bridge reads
+`contracts.governance_voting.address` from `KORA_DEPLOYMENT_MANIFEST`, which can
+point at the network manifest written by `scripts/deploy.sh`.
+The address must identify the contract with the `Proposal` schema
 in [`kora-governance-voting`](../../contracts/governance_voting/src/lib.rs).
 Its generated Rust typed client is `GovernanceVotingContractClient`; use
 `get_proposal` to read the title, description, and three vote tallies consumed

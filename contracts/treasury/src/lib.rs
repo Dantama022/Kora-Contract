@@ -161,6 +161,8 @@ pub enum DataKey {
     TreasuryProposal(u64),
     NextGrantId,
     Grant(u64),
+    /// Evidence commitment submitted for a grant milestone.
+    GrantMilestoneProof(u64, u32),
     // ── Asset Allocation Policy (Issue #673) ────────────────────────────────
     /// Governed allocation policy for a given asset (target min/max ranges).
     AssetAllocationPolicy(Address),
@@ -1870,6 +1872,46 @@ impl TreasuryContract {
         env.storage().persistent().get(&DataKey::Grant(grant_id)).ok_or(TreasuryError::GrantNotFound)
     }
 
+    /// Submit an evidence hash for the grant's next milestone. The recipient must
+    /// authenticate; a quorum-approved release action is the review of that evidence.
+    pub fn submit_grant_milestone_proof(
+        env: Env,
+        recipient: Address,
+        grant_id: u64,
+        proof_hash: BytesN<32>,
+    ) -> Result<(), KoraError> {
+        recipient.require_auth();
+        let mut grant: GrantProposal = env.storage().persistent()
+            .get(&DataKey::Grant(grant_id))
+            .ok_or(KoraError::ProposalNotFound)?;
+        if grant.recipient != recipient || !grant.reviewed || grant.closed
+            || grant.next_milestone >= grant.milestones.len()
+        {
+            return Err(KoraError::Unauthorized);
+        }
+
+        let proof_key = DataKey::GrantMilestoneProof(grant_id, grant.next_milestone);
+        if env.storage().persistent().has(&proof_key) {
+            return Err(KoraError::Unauthorized);
+        }
+        env.storage().persistent().set(&proof_key, &proof_hash);
+        Self::bump_persistent(&env, &proof_key);
+        grant.last_activity_at = env.ledger().timestamp();
+        env.storage().persistent().set(&DataKey::Grant(grant_id), &grant);
+        Self::bump_persistent(&env, &DataKey::Grant(grant_id));
+        Ok(())
+    }
+
+    /// Read the evidence hash submitted for a milestone, if any.
+    pub fn get_grant_milestone_proof(
+        env: Env,
+        grant_id: u64,
+        milestone_index: u32,
+    ) -> Option<BytesN<32>> {
+        env.storage().persistent()
+            .get(&DataKey::GrantMilestoneProof(grant_id, milestone_index))
+    }
+
     fn review_grant(env: &Env, grant_id: u64) -> Result<(), KoraError> {
         let mut grant: GrantProposal = env.storage().persistent().get(&DataKey::Grant(grant_id))
             .ok_or(KoraError::ProposalNotFound)?;
@@ -1889,6 +1931,12 @@ impl TreasuryContract {
             return Err(KoraError::Unauthorized);
         }
         if !grant.reviewed {
+            return Err(KoraError::Unauthorized);
+        }
+        if !env.storage().persistent().has(&DataKey::GrantMilestoneProof(
+            grant_id,
+            grant.next_milestone,
+        )) {
             return Err(KoraError::Unauthorized);
         }
         let amount = grant.milestones.get(grant.next_milestone).ok_or(KoraError::ProposalNotFound)?;
@@ -2663,6 +2711,150 @@ mod tests {
         let token_client = token::StellarAssetClient::new(env, &token_id);
         token_client.mint(recipient, &amount);
         token_id
+    }
+
+    fn configure_grant_multisig(
+        env: &Env,
+        admin: &Address,
+        client: &TreasuryContractClient<'_>,
+    ) -> (Address, Address) {
+        let access_control_id = env.register_contract(
+            None,
+            kora_access_control::AccessControlContract,
+        );
+        let access_control =
+            kora_access_control::AccessControlContractClient::new(env, &access_control_id);
+        access_control.initialize(admin);
+        let signer_one = Address::generate(env);
+        let signer_two = Address::generate(env);
+        let mut signers = Vec::new(env);
+        signers.push_back(signer_one.clone());
+        signers.push_back(signer_two.clone());
+        access_control.configure_multisig(admin, &signers, &2u32);
+        client.set_access_control(admin, &access_control_id);
+        (signer_one, signer_two)
+    }
+
+    fn execute_grant_action(
+        env: &Env,
+        client: &TreasuryContractClient<'_>,
+        signer_one: &Address,
+        signer_two: &Address,
+        action: TreasuryAction,
+    ) {
+        let proposal_id = client.propose_treasury_action(signer_one, &action);
+        client.approve_treasury_action(signer_two, &proposal_id);
+        env.ledger()
+            .with_mut(|ledger| ledger.timestamp += TREASURY_GOVERNANCE_TIMELOCK_DELAY);
+        client.execute_treasury_action(signer_one, &proposal_id);
+    }
+
+    #[test]
+    fn test_grant_proof_partial_release_reclaim_and_report_lifecycle() {
+        let (env, admin, client) = setup();
+        let treasury_id = client.address.clone();
+        let (signer_one, signer_two) = configure_grant_multisig(&env, &admin, &client);
+        let recipient = Address::generate(&env);
+        let token_id = deploy_token(&env, &admin, &treasury_id, 100);
+        client.whitelist_token(&admin, &token_id);
+        client.collect_fee(&token_id, &100i128);
+
+        let mut milestones = Vec::new(&env);
+        milestones.push_back(20i128);
+        milestones.push_back(30i128);
+        let grant_id = client.submit_grant_proposal(
+            &signer_one,
+            &recipient,
+            &token_id,
+            &String::from_str(&env, "Community support program"),
+            &milestones,
+        );
+
+        execute_grant_action(
+            &env,
+            &client,
+            &signer_one,
+            &signer_two,
+            TreasuryAction::ReviewGrant(grant_id),
+        );
+        assert!(client.get_grant_proposal(&grant_id).reviewed);
+
+        let release_proposal = client.propose_treasury_action(
+            &signer_one,
+            &TreasuryAction::ReleaseGrantMilestone(grant_id),
+        );
+        client.approve_treasury_action(&signer_two, &release_proposal);
+        env.ledger()
+            .with_mut(|ledger| ledger.timestamp += TREASURY_GOVERNANCE_TIMELOCK_DELAY);
+        assert_eq!(
+            client
+                .try_execute_treasury_action(&signer_one, &release_proposal)
+                .unwrap_err()
+                .unwrap(),
+            KoraError::Unauthorized
+        );
+
+        let proof_one = BytesN::<32>::from_array(&env, &[1u8; 32]);
+        let stranger = Address::generate(&env);
+        assert_eq!(
+            client
+                .try_submit_grant_milestone_proof(&stranger, &grant_id, &proof_one)
+                .unwrap_err()
+                .unwrap(),
+            KoraError::Unauthorized
+        );
+        client.submit_grant_milestone_proof(&recipient, &grant_id, &proof_one);
+        assert_eq!(client.get_grant_milestone_proof(&grant_id, &0), Some(proof_one));
+
+        execute_grant_action(
+            &env,
+            &client,
+            &signer_one,
+            &signer_two,
+            TreasuryAction::ReleaseGrantMilestone(grant_id),
+        );
+        let after_partial_release = client.get_grant_proposal(&grant_id);
+        assert_eq!(after_partial_release.next_milestone, 1);
+        assert_eq!(after_partial_release.remaining, 30);
+        assert!(!after_partial_release.closed);
+        assert_eq!(token::Client::new(&env, &token_id).balance(&recipient), 20);
+
+        let proof_two = BytesN::<32>::from_array(&env, &[2u8; 32]);
+        client.submit_grant_milestone_proof(&recipient, &grant_id, &proof_two);
+        env.ledger()
+            .with_mut(|ledger| ledger.timestamp += GRANT_RECLAIM_DELAY);
+        execute_grant_action(
+            &env,
+            &client,
+            &signer_one,
+            &signer_two,
+            TreasuryAction::ReclaimGrant(grant_id),
+        );
+
+        let reclaimed = client.get_grant_proposal(&grant_id);
+        assert!(reclaimed.closed);
+        assert_eq!(reclaimed.remaining, 0);
+        assert_eq!(reclaimed.next_milestone, 1);
+        assert_eq!(token::Client::new(&env, &token_id).balance(&recipient), 20);
+
+        let mut report_tokens = Vec::new(&env);
+        report_tokens.push_back(token_id.clone());
+        let report = client.generate_transparency_report(&admin, &7u64, &report_tokens);
+        let token_report = report.balances.get(0).unwrap();
+        assert_eq!(token_report.inflows, 100);
+        assert_eq!(token_report.outflows, 20);
+        assert_eq!(token_report.ending_balance, 80);
+        assert_eq!(client.get_last_reported_epoch(), 7);
+        assert_eq!(
+            client
+                .get_transparency_report(&7u64)
+                .unwrap()
+                .balances
+                .get(0)
+                .unwrap()
+                .outflows,
+            20,
+        );
     }
 
     // ── initialize ────────────────────────────────────────────────────────────
