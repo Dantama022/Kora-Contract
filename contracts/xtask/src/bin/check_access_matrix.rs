@@ -166,9 +166,56 @@ fn load_access_matrix() -> HashMap<(ContractName, FunctionName), Authorization> 
     matrix.insert(("treasury".into(), "get_balance".into()), Authorization::Permissionless);
     matrix.insert(("treasury".into(), "get_allocation".into()), Authorization::Permissionless);
 
+    // ── Issue #917: Extended matrix entries for all deploy.sh contracts ──────
+
+    // secondary_market (issue #917)
+    matrix.insert(("secondary_market".into(), "initialize".into()), Authorization::Permissionless);
+    matrix.insert(("secondary_market".into(), "pause".into()), Authorization::Admin);
+    matrix.insert(("secondary_market".into(), "unpause".into()), Authorization::Admin);
+    matrix.insert(("secondary_market".into(), "update_protocol_fee_bps".into()), Authorization::Admin);
+    matrix.insert(("secondary_market".into(), "list_position".into()), Authorization::SelfOwned);
+    matrix.insert(("secondary_market".into(), "buy_position".into()), Authorization::SelfOwned);
+    matrix.insert(("secondary_market".into(), "cancel_listing".into()), Authorization::SelfOwned);
+
+    // fractionalizer (issue #917)
+    matrix.insert(("fractionalizer".into(), "initialize".into()), Authorization::Permissionless);
+    matrix.insert(("fractionalizer".into(), "wrap".into()), Authorization::SelfOwned);
+    matrix.insert(("fractionalizer".into(), "transfer_shares".into()), Authorization::SelfOwned);
+    matrix.insert(("fractionalizer".into(), "settle".into()), Authorization::Admin);
+    matrix.insert(("fractionalizer".into(), "redeem".into()), Authorization::SelfOwned);
+    matrix.insert(("fractionalizer".into(), "unwrap".into()), Authorization::SelfOwned);
+    matrix.insert(("fractionalizer".into(), "get_wrap".into()), Authorization::Permissionless);
+    matrix.insert(("fractionalizer".into(), "get_share_balance".into()), Authorization::Permissionless);
+
+    // dispute_escrow (issue #917)
+    matrix.insert(("dispute_escrow".into(), "initialize".into()), Authorization::Permissionless);
+    matrix.insert(("dispute_escrow".into(), "open_dispute".into()), Authorization::SelfOwned);
+    matrix.insert(("dispute_escrow".into(), "resolve_dispute".into()), Authorization::Admin);
+    matrix.insert(("dispute_escrow".into(), "resolve_timeout".into()), Authorization::Permissionless);
+    matrix.insert(("dispute_escrow".into(), "get_dispute".into()), Authorization::Permissionless);
+
+    // governance_voting (issue #917)
+    matrix.insert(("governance_voting".into(), "initialize".into()), Authorization::Permissionless);
+    matrix.insert(("governance_voting".into(), "set_voting_weight".into()), Authorization::Admin);
+    matrix.insert(("governance_voting".into(), "get_voting_weight".into()), Authorization::Permissionless);
+    matrix.insert(("governance_voting".into(), "delegate".into()), Authorization::SelfOwned);
+    matrix.insert(("governance_voting".into(), "revoke_delegation".into()), Authorization::SelfOwned);
+    matrix.insert(("governance_voting".into(), "get_delegate".into()), Authorization::Permissionless);
+    matrix.insert(("governance_voting".into(), "create_proposal".into()), Authorization::SelfOwned);
+    matrix.insert(("governance_voting".into(), "vote".into()), Authorization::SelfOwned);
+    matrix.insert(("governance_voting".into(), "get_proposal".into()), Authorization::Permissionless);
+    matrix.insert(("governance_voting".into(), "get_vote_record".into()), Authorization::Permissionless);
+    matrix.insert(("governance_voting".into(), "execute_proposal".into()), Authorization::Admin);
+
+    // referral_rewards (issue #917)
+    matrix.insert(("referral_rewards".into(), "initialize".into()), Authorization::Permissionless);
+    matrix.insert(("referral_rewards".into(), "deposit".into()), Authorization::Admin);
+    matrix.insert(("referral_rewards".into(), "claim_referral_reward".into()), Authorization::SelfOwned);
+    matrix.insert(("referral_rewards".into(), "has_claimed".into()), Authorization::Permissionless);
+    matrix.insert(("referral_rewards".into(), "paid_total".into()), Authorization::Permissionless);
+
     matrix
 }
-
 /// Parse a function's body to detect authorization patterns
 fn detect_authorization(func: &ImplItemFn) -> Authorization {
     let func_body = quote::quote!(#func).to_string();
@@ -266,8 +313,26 @@ fn main() {
     let mut undocumented: Vec<(ContractName, FunctionName)> = Vec::new();
 
     // Scan each contract directory
-    let contract_dirs = ["access_control", "risk_registry", "invoice_nft", "marketplace",
-                         "financing_pool", "price_oracle", "dispute_resolution", "treasury"];
+    // Issue #917: Scan ALL deployed crates from deploy.sh (original 8 + 5 new).
+    // Adding a new crate to deploy.sh without a matrix entry will cause undocumented[]
+    // to be non-empty, failing CI with exit code 1.
+    let contract_dirs = [
+        // Original 8 (always-deployed)
+        "access_control",
+        "risk_registry",
+        "invoice_nft",
+        "marketplace",
+        "financing_pool",
+        "price_oracle",
+        "dispute_resolution",
+        "treasury",
+        // Issue #917: newly added to matrix coverage
+        "secondary_market",
+        "fractionalizer",
+        "dispute_escrow",
+        "governance_voting",
+        "referral_rewards",
+    ];
 
     for contract_name in &contract_dirs {
         if let Some(filter) = filter_contract {

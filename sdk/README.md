@@ -113,6 +113,21 @@ recover its transaction tracker.
 | `kora.riskRegistry` | `risk_registry` — SME/verifier management |
 | `kora.accessControl` | `access_control` — pause/unpause, roles |
 | `kora.priceOracle` | `price_oracle` — asset prices |
+| `kora.parameterRegistry` | `parameter_registry` — governable parameter storage |
+
+## Parameter registry keys
+
+The `parameter_registry` contract stores every governable protocol parameter under
+a typed key. Treasury-specific keys:
+
+| Key | Default | Min | Max | Description |
+|-----|---------|-----|-----|-------------|
+| `TreasuryFeeBps` | 50 | 0 | 10 000 | Protocol fee in basis points |
+| `ReserveAllocationBps` | 0 | 0 | 10 000 | Portion of fees routed to loss reserve |
+
+Consuming contracts read from the registry at runtime. Governance updates go
+through the registry's multisig proposal flow (`propose_param_update` →
+`approve_param_update` → `execute_param_update`).
 
 ## Public API (third-party integrators)
 

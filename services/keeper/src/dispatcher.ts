@@ -11,6 +11,13 @@
  */
 
 import { TriggerResult, Job, KeeperConfig } from "./types";
+import {
+  Contract,
+  Keypair,
+  nativeToScVal,
+  SorobanRpc,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 import pino from "pino";
 
 const logger = pino({ name: "keeper:dispatcher" });
@@ -57,8 +64,11 @@ const NOOP_ERROR_CODES = new Set([
 export class Dispatcher {
   /** 10 transactions per minute maximum. */
   private readonly rateLimiter = new TokenBucket(10, 6_000);
+  private readonly rpc: SorobanRpc.Server;
 
-  constructor(private readonly config: KeeperConfig) {}
+  constructor(private readonly config: KeeperConfig) {
+    this.rpc = new SorobanRpc.Server(config.rpcUrl);
+  }
 
   /**
    * Attempt to submit the permissionless trigger transaction for a job.
@@ -104,28 +114,7 @@ export class Dispatcher {
       "Submitting trigger transaction"
     );
 
-    /*
-     * NOTE: Real Stellar Soroban SDK invocation would be constructed here.
-     * The pattern is:
-     *
-     *   const server = new SorobanRpc.Server(this.config.rpcUrl);
-     *   const keypair = Keypair.fromSecret(this.config.keeperSecret);
-     *   const account = await server.getAccount(keypair.publicKey());
-     *   const contract = new Contract(job.contractAddress);
-     *   const tx = new TransactionBuilder(account, { fee: String(bumpedFee) })
-     *     .addOperation(contract.call(fnName, xdr.ScVal.scvU64(xdr.Uint64.fromString(job.invoiceId))))
-     *     .setTimeout(30)
-     *     .setNetworkPassphrase(this.config.networkPassphrase)
-     *     .build();
-     *   const preparedTx = await server.prepareTransaction(tx);
-     *   preparedTx.sign(keypair);
-     *   const result = await server.sendTransaction(preparedTx);
-     *   return result.hash;
-     *
-     * This is left as an integration seam so unit tests can inject mocks
-     * without a live Stellar node.
-     */
-    return await this._submitStellarTransaction(
+    return this._submitStellarTransaction(
       job.contractAddress,
       fnName,
       job.invoiceId,
@@ -137,14 +126,30 @@ export class Dispatcher {
    * Override this in tests or subclasses to inject mock Stellar behaviour.
    */
   protected async _submitStellarTransaction(
-    _contractAddress: string,
-    _fnName: string,
-    _invoiceId: string,
-    _fee: number
+    contractAddress: string,
+    fnName: string,
+    invoiceId: string,
+    fee: number
   ): Promise<string> {
-    throw new Error(
-      "Stellar RPC not configured — set up SorobanRpc.Server in production"
+    const keypair = Keypair.fromSecret(this.config.keeperSecret);
+    const account = await this.rpc.getAccount(keypair.publicKey());
+    const operation = new Contract(contractAddress).call(
+      fnName,
+      nativeToScVal(BigInt(invoiceId), { type: "u64" })
     );
+    const transaction = new TransactionBuilder(account, { fee: String(fee) })
+      .addOperation(operation)
+      .setTimeout(30)
+      .setNetworkPassphrase(this.config.networkPassphrase)
+      .build();
+    const prepared = await this.rpc.prepareTransaction(transaction);
+    prepared.sign(keypair);
+    const result = await this.rpc.sendTransaction(prepared);
+
+    if (result.status === "ERROR") {
+      throw new Error(`Soroban RPC rejected transaction: ${result.errorResult ?? "unknown error"}`);
+    }
+    return result.hash;
   }
 
   private _triggerFunction(kind: string): string {
@@ -155,6 +160,8 @@ export class Dispatcher {
         return "trigger_default_check";
       case "grace_period_end":
         return "mark_defaulted";
+      case "listing_ttl":
+        return "bump_listing_ttl";
       default:
         throw new Error(`Unknown deadline kind: ${kind}`);
     }

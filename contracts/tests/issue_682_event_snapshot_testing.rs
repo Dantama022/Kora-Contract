@@ -217,10 +217,10 @@ mod issue_682_event_snapshot_testing {
             "contract": "financing_pool",
             "event": "PositionCreated",
             "fields": {
-                "position_id": "u64",
-                "pool_id": "u64",
+                "caller": "Address",
+                "invoice_id": "u64",
                 "investor": "Address",
-                "amount": "i128",
+                "contributed": "i128",
                 "share_bps": "u32",
                 "timestamp": "(NORMALIZED_TIMESTAMP)"
             }

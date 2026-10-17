@@ -29,6 +29,15 @@ pattern through a whitelisted token contract) that pure CEI cannot.
 
 ---
 
+## Mutual Exclusion (Mutex) for Capital-Exit and Secondary Transfers (#897)
+
+To prevent double-spend of payout rights across concurrent early settlement, repayment, and secondary market transfers:
+1. **Repayment Mutex**: `repay`, `repay_partial`, and early settlement execute with `RepaymentLock(invoice_id)`. Secondary market listing (`list_share_for_sale`) and buying (`buy_share`) explicitly check `RepaymentLock(invoice_id)` and revert with `Unauthorized` if repayment is active.
+2. **Early Settlement Mutex**: Investors who have accepted an `EarlySettlementOffer` are prevented from listing their positions/shares on the secondary market.
+3. **Secondary Market Mutex**: Active secondary sales prevent conflicting position exit transitions until settled or cancelled.
+
+---
+
 ## Audit Matrix
 
 Each row records one cross-contract call site, whether it follows CEI ordering,

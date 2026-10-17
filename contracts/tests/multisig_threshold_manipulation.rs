@@ -92,12 +92,12 @@ mod multisig_threshold_manipulation {
     // Admin then reconfigures to a new 2-of-3 that excludes B (but keeps A).
     // The proposal already has 2 approvals stored.
     //
-    // Intended behaviour: execution by a member of the NEW set succeeds because
-    // the approval count (2) still meets the new threshold (2).  The reconfigured
-    // set does not retroactively invalidate stored votes.
+    // Issue #915 hardened behaviour: at execution time, each stored voter is
+    // re-validated against the CURRENT signer set.  Signer B was removed, so
+    // only A's approval counts → 1 valid approval < threshold 2 → execution FAILS.
     //
-    // This is documented as a known design choice; a stricter implementation would
-    // re-validate each stored voter against the current set at execution time.
+    // This supersedes the old design-choice comment (issue #614) that allowed
+    // stale votes to count.
     #[test]
     fn signer_removed_after_voting_proposal_still_executes() {
         let (env, admin, signers, client) = setup(3, 2);
@@ -118,12 +118,14 @@ mod multisig_threshold_manipulation {
         new_signers.push_back(signer_d.clone());
         client.configure_multisig(&admin, &new_signers, &2u32);
 
-        // Signer A (still in new set) executes. Proposal has 2 approvals, threshold is 2.
+        // Signer A tries to execute.  B's vote is now stale (B removed) → only 1
+        // valid approval (A) remains, which is below threshold 2.
+        // Issue #915: execution must FAIL — stale votes are discarded.
         let result = client.try_execute_action(&signer_a, &proposal_id);
         assert!(
-            result.is_ok(),
-            "#614-1: execution must succeed — approval count (2) meets new threshold (2) \
-             even though signer B was removed after voting (known design: stored votes not re-validated)"
+            result.is_err(),
+            "#614-1 / #915: execution must fail — B's stale vote is discarded at execution time, \
+             leaving only 1 valid approval which is below the threshold of 2"
         );
     }
 
@@ -195,12 +197,12 @@ mod multisig_threshold_manipulation {
     //
     // A 2-of-3 multisig collects 2 votes.  Admin replaces ALL signers with a
     // completely new set (new threshold = 2).
-    // A member of the new set executes.
+    // A member of the new set tries to execute.
     //
-    // Intended behaviour: the executor must be a member of the CURRENT (new) set —
-    // that check is enforced by require_signer() against the live config.
-    // However, the stored approval count (2) still meets the new threshold (2),
-    // so execution succeeds.
+    // Issue #915 hardened behaviour: the stored approvals (from A and B of the
+    // OLD set) are re-validated against the NEW signer set (X, Y, Z).  None of
+    // the old voters are in the new set → 0 valid approvals < threshold 2 →
+    // execution must FAIL.  The new set must gather its own fresh approvals.
     #[test]
     fn signer_set_replaced_mid_proposal_new_signer_can_execute() {
         let (env, admin, old_signers, client) = setup(3, 2);
@@ -210,7 +212,7 @@ mod multisig_threshold_manipulation {
 
         let proposal_id = propose_pause(&client, &signer_a);
         client.approve_action(&signer_b, &proposal_id);
-        // 2 approvals stored (from old set).
+        // 2 approvals stored (from old set A and B).
 
         // Admin replaces entire signer set.
         let new_signer_x = Address::generate(&env);
@@ -222,12 +224,13 @@ mod multisig_threshold_manipulation {
         new_signers.push_back(new_signer_z.clone());
         client.configure_multisig(&admin, &new_signers, &2u32);
 
-        // Member of new set can execute — executor auth is checked against new config.
+        // New-set member tries to execute.  Old approvals (A, B) are both stale.
+        // 0 valid approvals < threshold 2 → must fail.
         let result = client.try_execute_action(&new_signer_x, &proposal_id);
         assert!(
-            result.is_ok(),
-            "#614-4: new-set member must be able to execute a proposal with sufficient stored approvals \
-             (documented behaviour: vote count re-validated against new threshold at execution)"
+            result.is_err(),
+            "#614-4 / #915: execution must fail — all stored approvals are from the old signer set \
+             and are discarded; 0 valid approvals cannot meet threshold 2"
         );
     }
 
@@ -371,6 +374,178 @@ mod multisig_threshold_manipulation {
         assert!(
             result.is_err(),
             "#614-10: configure_multisig with threshold > signers must be rejected"
+        );
+    }
+}
+
+    // ════════════════════════════════════════════════════════════════════════════
+    // Issue #915 — Re-validate multisig voters against current signer set
+    //
+    // The following tests verify that execute_action filters out approvals from
+    // signers who have been removed from the signer set between voting and
+    // execution.  This is a security hardening: stale votes must NOT count toward
+    // the threshold at execution time.
+    //
+    // Contrast with the existing Scenarios 1–5 (issue #614) which document the
+    // old *design choice* of not re-validating; these tests document and enforce
+    // the NEW hardened behaviour introduced by issue #915.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // ── Scenario 11: Single removed signer's vote does not count ─────────────
+    //
+    // A 2-of-3 multisig.  Signer A proposes (vote 1), Signer B approves (vote 2).
+    // Admin reconfigures to a new 2-of-3 that removes B (keeps A and C, adds D).
+    //
+    // Issue #915 hardened behaviour: only 1 valid approval remains (A) after
+    // re-validation — B's vote is discarded.  Threshold is still 2, so execution
+    // must FAIL.
+    #[test]
+    fn signer_removed_stale_vote_causes_execution_to_fail() {
+        let (env, admin, signers, client) = setup(3, 2);
+
+        let signer_a = signers.get(0).unwrap();
+        let signer_b = signers.get(1).unwrap();
+        let signer_c = signers.get(2).unwrap();
+
+        // A proposes (1 approval), B approves (2 approvals).
+        let proposal_id = propose_pause(&client, &signer_a);
+        client.approve_action(&signer_b, &proposal_id);
+        // Approval count = 2, threshold = 2 — would have executed before #915.
+
+        // Rotate B out; new set is {A, C, D}.
+        let signer_d = Address::generate(&env);
+        let mut new_signers = Vec::new(&env);
+        new_signers.push_back(signer_a.clone());
+        new_signers.push_back(signer_c.clone());
+        new_signers.push_back(signer_d.clone());
+        client.configure_multisig(&admin, &new_signers, &2u32);
+
+        // A tries to execute.  Only A's vote is valid → 1 valid < threshold 2.
+        let result = client.try_execute_action(&signer_a, &proposal_id);
+        assert!(
+            result.is_err(),
+            "#915-11: execution must fail when the only remaining valid vote is below threshold \
+             (stale vote from removed signer B must not count)"
+        );
+    }
+
+    // ── Scenario 12: 2-of-3 to 1-of-3 rotation — one valid voter still enough ─
+    //
+    // A 2-of-3 multisig collects 2 approvals (A and B).  Signer B is removed,
+    // lowering valid votes to 1.  Admin ALSO lowers the threshold to 1.
+    // Net result: 1 valid approval ≥ new threshold 1 → execution MUST succeed.
+    #[test]
+    fn valid_voter_after_rotation_succeeds_when_threshold_lowered() {
+        let (env, admin, signers, client) = setup(3, 2);
+
+        let signer_a = signers.get(0).unwrap();
+        let signer_b = signers.get(1).unwrap();
+        let signer_c = signers.get(2).unwrap();
+
+        let proposal_id = propose_pause(&client, &signer_a);
+        client.approve_action(&signer_b, &proposal_id);
+
+        // Remove B, lower threshold to 1.
+        let mut new_signers = Vec::new(&env);
+        new_signers.push_back(signer_a.clone());
+        new_signers.push_back(signer_c.clone());
+        client.configure_multisig(&admin, &new_signers, &1u32);
+
+        // 1 valid approval (A) ≥ new threshold 1 → success.
+        let result = client.try_execute_action(&signer_a, &proposal_id);
+        assert!(
+            result.is_ok(),
+            "#915-12: execution must succeed when valid votes (1) meet the new threshold (1) \
+             even though B's vote was discarded"
+        );
+    }
+
+    // ── Scenario 13: Removed signer cannot execute alone ─────────────────────
+    //
+    // A 1-of-1 multisig: signer A proposes and immediately has quorum.  Admin
+    // replaces A with B.  Former signer A must NOT be able to execute.
+    #[test]
+    fn removed_signer_cannot_execute_alone_after_rotation() {
+        let (env, admin, signers, client) = setup(1, 1);
+
+        let signer_a = signers.get(0).unwrap();
+
+        let proposal_id = propose_pause(&client, &signer_a);
+        // Threshold was 1, A's vote is present — would have executed.
+
+        // Replace A with B.
+        let signer_b = Address::generate(&env);
+        let mut new_signers = Vec::new(&env);
+        new_signers.push_back(signer_b.clone());
+        client.configure_multisig(&admin, &new_signers, &1u32);
+
+        // A is no longer a signer; execute_action must reject A as executor.
+        let result = client.try_execute_action(&signer_a, &proposal_id);
+        assert!(
+            result.is_err(),
+            "#915-13: removed signer A must not be able to execute after replacement"
+        );
+    }
+
+    // ── Scenario 14: Duplicate voter entries do not inflate count ─────────────
+    //
+    // Guard against crafted proposals with the same address appearing twice in
+    // `approvals`.  The approval path rejects double-voting, but we verify the
+    // re-validation path also counts each distinct valid signer at most once.
+    //
+    // This tests the system end-to-end: we use the normal proposal flow (which
+    // prevents duplicates) to ensure that a 2-of-3 proposal with honest votes
+    // behaves correctly after one voter is removed (1 valid < 2 threshold).
+    #[test]
+    fn revalidation_counts_each_valid_signer_once() {
+        let (env, admin, signers, client) = setup(3, 2);
+
+        let signer_a = signers.get(0).unwrap();
+        let signer_b = signers.get(1).unwrap();
+        let signer_c = signers.get(2).unwrap();
+
+        let proposal_id = propose_pause(&client, &signer_a);
+        // Verify duplicate vote is rejected (dedup guard in approve_action).
+        assert!(
+            client.try_approve_action(&signer_a, &proposal_id).is_err(),
+            "#915-14: duplicate vote must be rejected"
+        );
+        client.approve_action(&signer_b, &proposal_id);
+        // approvals = [A, B], threshold = 2 → should be fine before rotation.
+
+        // Remove B; new threshold still 2.
+        let mut new_signers = Vec::new(&env);
+        new_signers.push_back(signer_a.clone());
+        new_signers.push_back(signer_c.clone());
+        client.configure_multisig(&admin, &new_signers, &2u32);
+
+        // Now only A is valid → 1 < 2 threshold → must fail.
+        let result = client.try_execute_action(&signer_a, &proposal_id);
+        assert!(
+            result.is_err(),
+            "#915-14: 1 valid approval must not meet a threshold of 2 after stale vote discarded"
+        );
+    }
+
+    // ── Scenario 15: All original voters remain — normal execution succeeds ───
+    //
+    // Control case: no signers removed.  The re-validation path must not break
+    // the normal happy path when all voters are still in the signer set.
+    #[test]
+    fn no_rotation_all_voters_still_valid_executes_normally() {
+        let (_env, _admin, signers, client) = setup(3, 2);
+
+        let signer_a = signers.get(0).unwrap();
+        let signer_b = signers.get(1).unwrap();
+
+        let proposal_id = propose_pause(&client, &signer_a);
+        client.approve_action(&signer_b, &proposal_id);
+
+        // No reconfiguration — all voters still valid.
+        let result = client.try_execute_action(&signer_a, &proposal_id);
+        assert!(
+            result.is_ok(),
+            "#915-15: normal 2-of-3 execution must still succeed when no signers have been removed"
         );
     }
 }

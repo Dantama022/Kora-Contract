@@ -12,7 +12,8 @@
 #   - Contracts built: make build
 #
 # Dependency order (must match constructor requirements):
-#   access_control → invoice_nft / risk_registry → financing_pool → treasury → marketplace
+#   access_control → invoice_nft / risk_registry / dispute_resolution
+#   → financing_pool → dispute_escrow → marketplace
 # =============================================================================
 # Environment Variables (all optional — defaults shown)
 # =============================================================================
@@ -30,9 +31,8 @@
 # Admin
 #   DEPLOYER_SECRET           Required. Stellar secret key / account alias for the deployer.
 #                             The derived public key is used as the initial admin for all contracts.
-#   DEPLOY_DISPUTE_ESCROW     Optional: true to deploy repayment escrow (default: false).
-#                             Requires pool escrow hooks before custody can be used;
-#                             see docs/dispute-escrow.md.
+#   DEPLOY_DISPUTE_ESCROW     Optional: false to skip repayment escrow (default: true).
+#                             See docs/dispute-escrow.md.
 #
 # =============================================================================
 
@@ -53,7 +53,7 @@ MARKETPLACE_REFERRER_BPS="${MARKETPLACE_REFERRER_BPS:-0}"
 LATE_PENALTY_BPS="${LATE_PENALTY_BPS:-200}"
 MAX_POSITION_BPS="${MAX_POSITION_BPS:-5000}"
 ORACLE_BASE_CURRENCY="${ORACLE_BASE_CURRENCY:-USDC}"
-DEPLOY_DISPUTE_ESCROW="${DEPLOY_DISPUTE_ESCROW:-false}"
+DEPLOY_DISPUTE_ESCROW="${DEPLOY_DISPUTE_ESCROW:-true}"
 case "$DEPLOY_DISPUTE_ESCROW" in
   true|false) ;;
   *) echo "ERROR: DEPLOY_DISPUTE_ESCROW must be true or false." >&2; exit 1 ;;
@@ -164,8 +164,16 @@ echo "  risk_registry  : $RISK_REGISTRY_ID"
 TREASURY_ID=$(deploy_contract "treasury" "$WASM_DIR/kora_treasury.wasm")
 echo "  treasury       : $TREASURY_ID"
 
+DISPUTE_RESOLUTION_ID=$(deploy_contract "dispute_resolution" "$WASM_DIR/kora_dispute_resolution.wasm")
+echo "  dispute_resolution: $DISPUTE_RESOLUTION_ID"
+
 POOL_ID=$(deploy_contract "financing_pool" "$WASM_DIR/kora_financing_pool.wasm")
 echo "  financing_pool : $POOL_ID"
+
+if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
+  DISPUTE_ESCROW_ID=$(deploy_contract "dispute_escrow" "$WASM_DIR/kora_dispute_escrow.wasm")
+  echo "  dispute_escrow : $DISPUTE_ESCROW_ID"
+fi
 
 MARKETPLACE_ID=$(deploy_contract "marketplace" "$WASM_DIR/kora_marketplace.wasm")
 echo "  marketplace    : $MARKETPLACE_ID"
@@ -200,6 +208,11 @@ invoke "$TREASURY_ID" initialize \
   --fee_bps "$TREASURY_FEE_BPS"
 echo "  treasury initialized (fee: ${TREASURY_FEE_BPS} bps)"
 
+invoke "$DISPUTE_RESOLUTION_ID" initialize \
+  --admin "$ADMIN" \
+  --access_control "$ACCESS_CONTROL_ID"
+echo "  dispute_resolution initialized"
+
 invoke "$POOL_ID" initialize \
   --admin "$ADMIN" \
   --invoice_nft "$INVOICE_NFT_ID" \
@@ -208,12 +221,14 @@ invoke "$POOL_ID" initialize \
   --access_control "$ACCESS_CONTROL_ID" \
   --late_penalty_bps "$LATE_PENALTY_BPS" \
   --price_oracle "$PRICE_ORACLE_ID" \
-  --max_position_bps "$MAX_POSITION_BPS"
+  --max_position_bps "$MAX_POSITION_BPS" \
+  --grace_period 0 \
+  --dispute_resolution "$DISPUTE_RESOLUTION_ID"
 echo "  financing_pool initialized (late penalty: ${LATE_PENALTY_BPS} bps, max position: ${MAX_POSITION_BPS} bps)"
 
 if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
   invoke "$DISPUTE_ESCROW_ID" initialize --admin "$ADMIN" --pool "$POOL_ID"
-  echo "  dispute_escrow initialized; pool escrow hooks must be wired before use"
+  echo "  dispute_escrow initialized"
 fi
 
 invoke "$MARKETPLACE_ID" initialize \
@@ -222,9 +237,24 @@ invoke "$MARKETPLACE_ID" initialize \
   --financing_pool "$POOL_ID" \
   --treasury "$TREASURY_ID" \
   --access_control "$ACCESS_CONTROL_ID" \
+  --price_oracle "$PRICE_ORACLE_ID" \
+  --risk_registry "$RISK_REGISTRY_ID" \
   --fee_bps "$MARKETPLACE_FEE_BPS" \
   --referrer_split_bps "$MARKETPLACE_REFERRER_BPS"
 echo "  marketplace initialized (fee: ${MARKETPLACE_FEE_BPS} bps, referrer split: ${MARKETPLACE_REFERRER_BPS} bps)"
+
+invoke "$POOL_ID" set_marketplace --admin "$ADMIN" --marketplace "$MARKETPLACE_ID"
+echo "  financing_pool marketplace configured"
+
+invoke "$MARKETPLACE_ID" set_referrer_split_bps \
+  --admin "$ADMIN" \
+  --referrer_split_bps "$MARKETPLACE_REFERRER_BPS"
+echo "  marketplace referrer split configured (${MARKETPLACE_REFERRER_BPS} bps)"
+
+if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
+  invoke "$POOL_ID" set_dispute_escrow --admin "$ADMIN" --escrow "$DISPUTE_ESCROW_ID"
+  echo "  financing_pool dispute escrow configured"
+fi
 
 invoke "$RISK_REGISTRY_ID" initialize \
   --admin "$ADMIN" \

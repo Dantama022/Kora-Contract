@@ -16,6 +16,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Bytes, B
 // ~30 days in ledgers at ~5 s/ledger
 const PERSISTENT_TTL_THRESHOLD: u32 = 518_400;
 const PERSISTENT_TTL_BUMP: u32 = 518_400;
+const LISTING_TTL_BUMP: u32 = 1_036_800;
 
 /// Maximum number of items accepted by marketplace batch entrypoints in one call.
 const MAX_BATCH_SIZE: u32 = 20;
@@ -2874,6 +2875,16 @@ mod tests {
         assert_eq!(listing.token, t.token);
         assert!(listing.is_active);
         assert_eq!(listing.funded_amount, 0);
+    }
+
+    #[test]
+    fn test_bump_listing_ttl_is_permissionless() {
+        let t = deploy();
+        let id = list_one(&t);
+
+        t.mp.bump_listing_ttl(&id);
+
+        assert!(t.mp.get_listing(&id).is_active);
     }
 
     // ── fund_invoice (error-path tests that don't require token contracts) ────

@@ -4,7 +4,12 @@
 
 ## Mint and attribution
 
-Call `mint_invoice_with_referrer` with the existing mint fields plus `Option<Address>`. `mint_invoice` remains available for existing clients and records an unattributed first mint. A batch mint also records its first invoice as the SME's first mint without attribution. The first invoice ID and optional referrer are stored separately from the invoice schema, so withdrawals do not permit a new first mint or a changed referrer. Any attempt to supply a referrer after the first mint fails. Self-referrals, contract-self referrals, and cycles through existing referrals are rejected; traversal is bounded at 32 links and deeper chains are rejected. No downstream rewards are paid.
+Call `mint_invoice_with_referrer(sme, debtor_hash, amount, currency, due_date, ipfs_cid, risk_score, notes, referrer)` with the existing mint fields plus `Option<Address>`. `mint_invoice` remains available for existing clients and records an unattributed first mint. A batch mint also records its first invoice as the SME's first mint without attribution. The first invoice ID and optional referrer are stored separately from the invoice schema, so withdrawals do not permit a new first mint or a changed referrer. Any attempt to supply a referrer after the first mint fails. Self-referrals, contract-self referrals, and cycles through existing referrals are rejected; traversal is bounded at 32 links and deeper chains are rejected. No downstream rewards are paid.
+
+### View Functions
+
+- `get_sme_referrer(sme) -> Option<Address>`: returns the first-mint referrer for an SME, or None if not set.
+- `get_first_mint(sme) -> Option<u64>`: returns the invoice ID of an SME's first mint, or None if none minted.
 
 ## Funding and claiming
 

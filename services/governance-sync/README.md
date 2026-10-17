@@ -10,6 +10,27 @@ Syncs on-chain governance proposals from the `governance_voting` contract with a
 - **Retry with Backoff**: Handles forum API downtime gracefully
 - **Read-Only**: One-way sync (chain → forum), no forum-triggered actions
 
+## Weight Formula
+
+Vote weight for each proposal is computed as the beneficiary's **vested token
+balance** at the proposal's `created_at` snapshot timestamp:
+
+```
+weight = vesting_contract.get_vested_balance_at(voter, proposal.created_at)
+```
+
+- If the Vesting contract has not been set on the governance contract, the
+  vote weight falls back to the manual `VotingWeight` storage (backward
+  compatible). Once the vesting contract is set, manual weights are ignored
+  and only vested balances are used.
+- For delegated voting, the delegate's total weight is the sum of their own
+  vested balance plus the vested balance of each delegator (computed at the
+  current ledger timestamp, not the proposal snapshot).
+
+This formula ensures that only economically locked tokens contribute to
+governance influence. The off-chain sync service should read the `snapshot_at`
+field from `voteCast` events to reconcile tallies against vesting state.
+
 ## Architecture
 
 ```

@@ -78,3 +78,10 @@ path = "fuzz_targets/fuzz_marketplace_fee.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_secondary_market_settlement"
+path = "fuzz_targets/fuzz_secondary_market_settlement.rs"
+test = false
+doc = false
+bench = false

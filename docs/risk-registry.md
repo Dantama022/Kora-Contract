@@ -233,7 +233,16 @@ activity volume for risk analysis.
 | `get_verifier_status(verifier)` | `VerifierStatus` lifecycle state (`Active`/`Suspended`/`PendingRemoval`/`Removed`) |
 | `get_verifier_status_changed_at(verifier)` | Timestamp of last status transition, if any |
 | `get_verifier_removal_deadline(verifier)` | Earliest finalization timestamp for a pending removal, if any |
+| `get_access_control()` | Configured `access_control` address, if any |
 | `get_admin()` | Current admin address |
+
+---
+
+## Access Control Synchronization
+
+When an `access_control` contract address is configured via `set_access_control(admin, access_control)`, `risk_registry` synchronizes verifier lifecycle events with `access_control` roles:
+- `add_verifier`: grants `Role::Verifier` to the verifier address.
+- `remove_verifier` / `finalize_verifier_removal`: revokes `Role::Verifier` following stake return per reentrancy audit ordering.
 
 All read functions are authorization-free and safe to call from any context.
 

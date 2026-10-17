@@ -669,6 +669,32 @@ pub fn action_executed(env: &Env, proposal_id: u64, executor: &Address) {
     );
 }
 
+/// Emitted during multisig proposal execution when one or more recorded voters
+/// are no longer in the current signer set (issue #915).
+///
+/// Schema: (proposal_id, executor, discarded_count, valid_count, timestamp)
+/// - `discarded_count` — number of approvals dropped because the voter was removed from the signer set.
+/// - `valid_count`     — number of approvals that remain valid against the current signer set.
+pub fn stale_votes_discarded(
+    env: &Env,
+    proposal_id: u64,
+    executor: &Address,
+    discarded_count: u32,
+    valid_count: u32,
+) {
+    emit(
+        env,
+        symbol_short!("MS_STALE"),
+        (
+            proposal_id,
+            executor.clone(),
+            discarded_count,
+            valid_count,
+            env.ledger().timestamp(),
+        ),
+    );
+}
+
 // ── Refund Events ────────────────────────────────────────────────────────────
 
 /// Schema: (actor=investor, invoice_id, amount, timestamp)

@@ -708,6 +708,7 @@ dependencies = [
 name = "kora-dispute-escrow"
 version = "0.1.0"
 dependencies = [
+ "kora-shared",
  "soroban-sdk",
 ]
 
@@ -764,6 +765,7 @@ dependencies = [
  "kora-marketplace",
  "kora-price-oracle",
  "kora-risk-registry",
+ "kora-secondary-market",
  "kora-shared",
  "kora-treasury",
  "rand 0.8.5",
@@ -849,6 +851,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kora-secondary-market"
+version = "0.1.0"
+dependencies = [
+ "kora-financing-pool",
+ "kora-shared",
+ "kora-treasury",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "kora-shared"
 version = "0.1.0"
 dependencies = [
@@ -861,12 +873,15 @@ name = "kora-tests"
 version = "0.1.0"
 dependencies = [
  "kora-access-control",
+ "kora-dispute-escrow",
+ "kora-dispute-resolution",
  "kora-financing-pool",
  "kora-invoice-nft",
  "kora-marketplace",
  "kora-price-oracle",
  "kora-referral-rewards",
  "kora-risk-registry",
+ "kora-secondary-market",
  "kora-shared",
  "kora-treasury",
  "soroban-sdk",
