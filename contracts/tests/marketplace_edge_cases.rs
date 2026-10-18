@@ -74,8 +74,9 @@ mod marketplace_edge_cases {
         let mp_id = env.register_contract(None, kora_marketplace::MarketplaceContract);
         let mp = MarketplaceContractClient::new(&env, &mp_id);
         let mp_ac = Address::generate(&env);
+        let param_registry = mp_id; // self for unit tests
         mp.initialize(
-            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &50u32, &0u32,
+            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &param_registry, &50u32, &0u32,
         );
 
         mp.whitelist_token(&admin, &token);
@@ -189,8 +190,9 @@ mod marketplace_edge_cases {
         let mp_id = env.register_contract(None, kora_marketplace::MarketplaceContract);
         let mp = MarketplaceContractClient::new(&env, &mp_id);
         let mp_ac = Address::generate(&env);
+        let param_registry = mp_id; // self for unit tests
         mp.initialize(
-            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &0u32, &0u32,
+            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &param_registry, &0u32, &0u32,
         ); // 0 fee
 
         mp.whitelist_token(&admin, &token);
@@ -249,8 +251,9 @@ mod marketplace_edge_cases {
         let mp_id = env.register_contract(None, kora_marketplace::MarketplaceContract);
         let mp = MarketplaceContractClient::new(&env, &mp_id);
         let mp_ac = Address::generate(&env);
+        let param_registry = mp_id; // self for unit tests
         mp.initialize(
-            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &10_000u32, &0u32,
+            &admin, &nft_id, &pool_id, &treasury, &mp_ac, &oracle_id, &risk_registry, &param_registry, &10_000u32, &0u32,
         ); // 100% fee
 
         mp.whitelist_token(&admin, &token);
@@ -799,8 +802,9 @@ mod multi_token_tests {
 
         let mp_id = env.register_contract(None, kora_marketplace::MarketplaceContract);
         let mp = MarketplaceContractClient::new(&env, &mp_id);
+        let param_registry = mp_id; // self for unit tests
         mp.initialize(
-            &admin, &nft_id, &pool_id, &Address::generate(&env), &ac_id, &oracle, &rr, &50u32, &0u32,
+            &admin, &nft_id, &pool_id, &Address::generate(&env), &ac_id, &oracle, &rr, &param_registry, &50u32, &0u32,
         );
 
         mp.propose_token_whitelist(&admin, &token_a);

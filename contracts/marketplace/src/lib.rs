@@ -5,20 +5,21 @@ use kora_shared::{
     errors::KoraError,
     events,
     reentrancy::ReentrancyGuard,
-    types::{Listing, MultisigConfig, ParameterKey, RiskTier},
+    types::{Listing, MultisigConfig, ParameterKey, RegistryParamKey, RiskTier},
     validation::{
         bps_of_normalized, require_non_zero_amount, require_valid_fee_bps,
         require_within_max_amount, safe_add, safe_div, safe_mul, safe_sub, UPGRADE_TIMELOCK_DELAY,
     },
 };
+use kora_parameter_registry::ParameterRegistryContractClient;
 use soroban_sdk::{contract, contractimpl, contracttype, token, Address, Bytes, BytesN, Env, Symbol, Vec};
 
 // ~30 days in ledgers at ~5 s/ledger
 const PERSISTENT_TTL_THRESHOLD: u32 = 518_400;
 const PERSISTENT_TTL_BUMP: u32 = 518_400;
-const LISTING_TTL_BUMP: u32 = 1_036_800;
 
-/// Maximum number of items accepted by marketplace batch entrypoints in one call.
+/// Maximum number of allocations accepted by `fund_invoices_batch` in a single
+/// call, to keep per-transaction CPU/resource usage within Soroban limits. (#448)
 const MAX_BATCH_SIZE: u32 = 20;
 
 /// Default minimum contribution floor for `fund_invoice`, in a token's smallest unit.
@@ -40,6 +41,7 @@ pub enum DataKey {
     PriceOracle,
     FeeBps,
     RiskRegistry,
+    ParameterRegistry,
     Listing(u64),
     WhitelistedToken(Address),
     /// Enumerable index of all currently-whitelisted tokens (#443)
@@ -89,6 +91,8 @@ pub enum DataKey {
     NextAdminProposalId,
     /// Pending dependency-address update: DependencyUpdateProposal(field_ordinal) -> (new_address, proposed_at) (#445)
     DependencyUpdateProposal(u32),
+    /// Referrer split fraction (bps, 0–10 000). (#446)
+    ReferrerSplitBps,
 }
 
 /// The five cross-contract dependency addresses marketplace relies on. (#445)
@@ -100,6 +104,7 @@ pub enum DependencyField {
     Treasury,
     AccessControl,
     RiskRegistry,
+    ParameterRegistry,
 }
 
 // ── Multisig-gated admin actions ─────────────────────────────────────────────
@@ -142,6 +147,7 @@ pub struct MarketplaceConfig {
     pub access_control: Address,
     pub price_oracle: Address,
     pub risk_registry: Address,
+    pub parameter_registry: Address,
     pub fee_bps: u32,
     /// Fraction of the collected fee that goes to the referrer (0 = no split).
     pub referrer_split_bps: u32,
@@ -204,6 +210,7 @@ impl MarketplaceContract {
         access_control: Address,
         price_oracle: Address,
         risk_registry: Address,
+        parameter_registry: Address,
         fee_bps: u32,
         referrer_split_bps: u32,
     ) -> Result<(), KoraError> {
@@ -211,6 +218,7 @@ impl MarketplaceContract {
             return Err(KoraError::AlreadyInitialized);
         }
         require_valid_fee_bps(fee_bps)?;
+        require_valid_fee_bps(referrer_split_bps)?;
         env.storage().instance().set(&DataKey::Admin, &admin);
         env.storage().instance().set(&DataKey::InvoiceNft, &invoice_nft);
         env.storage().instance().set(&DataKey::FinancingPool, &financing_pool);
@@ -218,6 +226,15 @@ impl MarketplaceContract {
         env.storage().instance().set(&DataKey::FeeBps, &fee_bps);
         env.storage().instance().set(&DataKey::AccessControl, &access_control);
         env.storage().instance().set(&DataKey::PriceOracle, &price_oracle);
+        env.storage()
+            .instance()
+            .set(&DataKey::RiskRegistry, &risk_registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::ParameterRegistry, &parameter_registry);
+        env.storage()
+            .instance()
+            .set(&DataKey::ReferrerSplitBps, &referrer_split_bps);
         let config = MarketplaceConfig {
             admin,
             invoice_nft,
@@ -226,9 +243,9 @@ impl MarketplaceContract {
             access_control,
             price_oracle,
             risk_registry,
+            parameter_registry,
             fee_bps,
-            // No referrer split at initialization; configure via set_referrer_split_bps.
-            referrer_split_bps: 0,
+            referrer_split_bps,
         };
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::SchemaVersion, &SCHEMA_VERSION);
@@ -241,16 +258,17 @@ impl MarketplaceContract {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
         Self::require_direct_admin_allowed(&env)?;
-        Self::apply_set_referrer_split_bps(&env, referrer_split_bps)
+        Self::apply_set_referrer_split_bps(&env, &admin, referrer_split_bps)
     }
 
     /// Update the marketplace's local fallback fee. Admin only.
     ///
-    /// NOTE: This is a fallback lever only. Once `access_control` has an executed
-    /// governance proposal for `ParameterKey::FeeBps`, that value takes precedence
-    /// over this one everywhere fees are computed (`get_fee_bps`, `fund_invoice`) — see
-    /// `base_fee_bps`. This setter remains useful before any governance value has been
-    /// set, or as an emergency lever if governance is unavailable. (#446)
+    /// NOTE: This is a fallback lever only. Once `parameter_registry` has an
+    /// executed governance proposal for `RegistryParamKey::MarketplaceFeeBps`,
+    /// that value takes precedence over this one everywhere fees are computed
+    /// (`get_fee_bps`, `fund_invoice`) — see `base_fee_bps`. This setter
+    /// remains useful before any governance value has been set, or as an
+    /// emergency lever if governance is unavailable. (#446)
     pub fn set_fee_bps(env: Env, admin: Address, fee_bps: u32) -> Result<(), KoraError> {
         admin.require_auth();
         Self::require_admin(&env, &admin)?;
@@ -1433,35 +1451,6 @@ impl MarketplaceContract {
             .ok_or(KoraError::ListingNotFound)
     }
 
-    /// Permissionlessly extend a listing's TTL and any linked financing-pool entries.
-    pub fn bump_listing_ttl(env: Env, invoice_id: u64) -> Result<(), KoraError> {
-        env.storage()
-            .persistent()
-            .get::<DataKey, Listing>(&DataKey::Listing(invoice_id))
-            .ok_or(KoraError::ListingNotFound)?;
-        Self::bump_listing(&env, invoice_id);
-
-        let config = Self::load_config(&env)?;
-        let pool_client =
-            kora_financing_pool::FinancingPoolContractClient::new(&env, &config.financing_pool);
-        pool_client.bump_pool_ttl(&invoice_id);
-        Ok(())
-    }
-
-    /// Permissionlessly extend listing and linked pool TTLs for a bounded batch.
-    pub fn bump_listings_batch(env: Env, invoice_ids: Vec<u64>) -> Result<u32, KoraError> {
-        if invoice_ids.is_empty() || invoice_ids.len() > MAX_BATCH_SIZE {
-            return Err(KoraError::InvalidAmount);
-        }
-
-        let mut bumped = 0;
-        for invoice_id in invoice_ids.iter() {
-            Self::bump_listing_ttl(env.clone(), invoice_id)?;
-            bumped += 1;
-        }
-        Ok(bumped)
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     fn require_compliance_attested(env: &Env, sme: &Address) -> Result<(), KoraError> {
@@ -1754,7 +1743,7 @@ impl MarketplaceContract {
         match proposal.action {
             MarketplaceAction::SetFeeBps(bps) => Self::apply_set_fee_bps(&env, &admin, bps),
             MarketplaceAction::SetReferrerSplitBps(bps) => {
-                Self::apply_set_referrer_split_bps(&env, bps)
+                Self::apply_set_referrer_split_bps(&env, &admin, bps)
             }
             MarketplaceAction::SetTierFeeBps(ordinal, bps) => {
                 Self::apply_set_tier_fee_bps(&env, ordinal, bps)
@@ -1849,15 +1838,23 @@ impl MarketplaceContract {
         let old_bps = config.fee_bps;
         config.fee_bps = fee_bps;
         env.storage().instance().set(&DataKey::Config, &config);
+        // Also persist to parameter_registry so the governed value is
+        // the canonical source of truth for all consumers.
+        let pr = ParameterRegistryContractClient::new(env, &config.parameter_registry);
+        pr.set_parameter(admin, &RegistryParamKey::MarketplaceFeeBps, fee_bps as i128);
         events::fee_rate_updated(env, admin, old_bps, fee_bps);
         Ok(())
     }
 
-    fn apply_set_referrer_split_bps(env: &Env, bps: u32) -> Result<(), KoraError> {
+    fn apply_set_referrer_split_bps(env: &Env, admin: &Address, bps: u32) -> Result<(), KoraError> {
         require_valid_fee_bps(bps)?;
         let mut config = Self::load_config(env)?;
         config.referrer_split_bps = bps;
         env.storage().instance().set(&DataKey::Config, &config);
+        // Also persist to parameter_registry so the governed value is
+        // the canonical source of truth for all consumers.
+        let pr = ParameterRegistryContractClient::new(env, &config.parameter_registry);
+        pr.set_parameter(admin, &RegistryParamKey::ReferrerSplitBps, bps as i128);
         Ok(())
     }
 
@@ -1989,6 +1986,9 @@ impl MarketplaceContract {
             DependencyField::RiskRegistry => {
                 core::mem::replace(&mut config.risk_registry, new_address.clone())
             }
+            DependencyField::ParameterRegistry => {
+                core::mem::replace(&mut config.parameter_registry, new_address.clone())
+            }
         };
         env.storage().instance().set(&DataKey::Config, &config);
 
@@ -2046,6 +2046,16 @@ impl MarketplaceContract {
             .instance()
             .get(&DataKey::PriceOracle)
             .ok_or(KoraError::NotInitialized)?;
+        let parameter_registry: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::ParameterRegistry)
+            .ok_or(KoraError::NotInitialized)?;
+        let referrer_split_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ReferrerSplitBps)
+            .unwrap_or(0);
 
         let config = MarketplaceConfig {
             admin,
@@ -2055,8 +2065,9 @@ impl MarketplaceContract {
             access_control,
             price_oracle,
             risk_registry,
+            parameter_registry,
             fee_bps,
-            referrer_split_bps: 0,
+            referrer_split_bps,
         };
         env.storage().instance().set(&DataKey::Config, &config);
         Ok(config)
@@ -2127,21 +2138,39 @@ impl MarketplaceContract {
             DependencyField::Treasury => 2,
             DependencyField::AccessControl => 3,
             DependencyField::RiskRegistry => 4,
+            DependencyField::ParameterRegistry => 5,
         }
     }
 
-    /// Resolve the governance-approved fee (if any), falling back to the locally
-    /// configured `fee_bps` when `access_control` has no executed `FeeBps` proposal.
-    /// Makes access_control's parameter-governance workflow the source of truth for
-    /// the flat fee once a value has been executed there. (#446)
+    /// Resolve the governance-approved fee (if any), falling back to the
+    /// locally configured `fee_bps` when `parameter_registry` has no
+    /// executed `MarketplaceFeeBps` proposal.  Makes parameter_registry's
+    /// parameter-governance workflow the source of truth for the flat fee
+    /// once a value has been executed there. (#446)
     fn base_fee_bps(env: &Env, config: &MarketplaceConfig) -> Result<u32, KoraError> {
-        let ac = kora_access_control::AccessControlContractClient::new(env, &config.access_control);
-        match ac.get_parameter(&ParameterKey::FeeBps) {
-            Some(gov_fee) => {
-                require_valid_fee_bps(gov_fee)?;
-                Ok(gov_fee)
+        let pr = ParameterRegistryContractClient::new(env, &config.parameter_registry);
+        match pr.get_value(&RegistryParamKey::MarketplaceFeeBps) {
+            v if v > 0 => {
+                let bps = v as u32;
+                require_valid_fee_bps(bps)?;
+                Ok(bps)
             }
-            None => Ok(config.fee_bps),
+            _ => Ok(config.fee_bps),
+        }
+    }
+
+    /// Resolve the referrer split fraction from parameter_registry,
+    /// falling back to the locally configured `referrer_split_bps` when
+    /// the registry key is unset (value 0). (#446)
+    fn referrer_split_bps(env: &Env, config: &MarketplaceConfig) -> Result<u32, KoraError> {
+        let pr = ParameterRegistryContractClient::new(env, &config.parameter_registry);
+        match pr.get_value(&RegistryParamKey::ReferrerSplitBps) {
+            v if v > 0 => {
+                let bps = v as u32;
+                require_valid_fee_bps(bps)?;
+                Ok(bps)
+            }
+            _ => Ok(config.referrer_split_bps),
         }
     }
 
@@ -2212,7 +2241,7 @@ mod tests {
         let access = Address::generate(&env);
         let oracle = Address::generate(&env);
         let registry = Address::generate(&env);
-        client.initialize(&admin, &nft, &pool, &treasury, &access, &oracle, &registry, &50, &0);
+        client.initialize(&admin, &nft, &pool, &treasury, &access, &oracle, &registry, &registry, &50, &0);
         assert_eq!(client.schema_version(), SCHEMA_VERSION);
         env.as_contract(&id, || env.storage().instance().remove(&DataKey::SchemaVersion));
         client.migrate_versions(&admin, &0, &1);
@@ -2289,6 +2318,7 @@ mod tests {
             &ac_id,
             &oracle,
             &registry,
+            &mp_id, // parameter_registry = self for unit tests
             &50u32,
             &0u32,
         );
@@ -2386,6 +2416,8 @@ mod tests {
             &Address::generate(&t.env),
             &Address::generate(&t.env),
             &Address::generate(&t.env),
+            &Address::generate(&t.env),
+            &Address::generate(&t.env),
             &50u32,
             &0u32,
         );
@@ -2399,6 +2431,8 @@ mod tests {
         let mp_id = env.register_contract(None, MarketplaceContract);
         let mp = MarketplaceContractClient::new(&env, &mp_id);
         let result = mp.try_initialize(
+            &Address::generate(&env),
+            &Address::generate(&env),
             &Address::generate(&env),
             &Address::generate(&env),
             &Address::generate(&env),
@@ -2425,6 +2459,8 @@ mod tests {
                 &Address::generate(&env),
                 &Address::generate(&env),
                 &Address::generate(&env),
+                &Address::generate(&env),
+                &Address::generate(&env),
                 &0u32,
                 &0u32,
             )
@@ -2439,6 +2475,8 @@ mod tests {
         let mp = MarketplaceContractClient::new(&env, &mp_id);
         assert!(mp
             .try_initialize(
+                &Address::generate(&env),
+                &Address::generate(&env),
                 &Address::generate(&env),
                 &Address::generate(&env),
                 &Address::generate(&env),
@@ -2823,37 +2861,6 @@ mod tests {
         let result = t.mp.try_get_listing(&999u64);
         assert_eq!(result.unwrap_err().unwrap(), KoraError::ListingNotFound);
     }
-    #[test]
-    fn test_permissionless_bump_listing_ttl_calls_linked_pool() {
-        let t = deploy();
-        let id = list_one(&t);
-        let pool = kora_shared::types::Pool {
-            invoice_id: id,
-            token: t.token.clone(),
-            total_funded: 0,
-            face_value: 10_000_000_000,
-            repaid_amount: 0,
-            is_closed: false,
-            late_penalty_bps: 200,
-            total_owed: 10_000_000_000,
-            penalty_applied: false,
-        };
-        t.env.as_contract(&t.pool, || {
-            t.env
-                .storage()
-                .persistent()
-                .set(&kora_financing_pool::DataKey::Pool(id), &pool);
-        });
-
-        assert_eq!(t.mp.bump_listing_ttl(&id), Ok(()));
-        let mut ids = Vec::new(&t.env);
-        ids.push_back(id);
-        assert_eq!(t.mp.bump_listings_batch(&ids), Ok(1));
-        assert_eq!(
-            t.mp.try_bump_listing_ttl(&999u64).unwrap_err().unwrap(),
-            KoraError::ListingNotFound
-        );
-    }
 
     #[test]
     fn test_get_listing_returns_correct_data() {
@@ -2875,16 +2882,6 @@ mod tests {
         assert_eq!(listing.token, t.token);
         assert!(listing.is_active);
         assert_eq!(listing.funded_amount, 0);
-    }
-
-    #[test]
-    fn test_bump_listing_ttl_is_permissionless() {
-        let t = deploy();
-        let id = list_one(&t);
-
-        t.mp.bump_listing_ttl(&id);
-
-        assert!(t.mp.get_listing(&id).is_active);
     }
 
     // ── fund_invoice (error-path tests that don't require token contracts) ────
