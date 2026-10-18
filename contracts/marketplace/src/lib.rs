@@ -1266,11 +1266,23 @@ impl MarketplaceContract {
         Self::remove_debtor_exposure(&env, &invoice.debtor_hash, invoice_id,
             safe_add(net_contributed, fee_contributed)?)?;
 
+        // Decrement token exposure by the refunded gross amount so the cap
+        // returns to its pre-listing level once all investors refund (#974).
+        // Checked subtraction fails with an error (never panics) on underflow.
+        let gross_refunded = safe_add(net_contributed, fee_contributed)?;
+        let exp_key = DataKey::TokenExposureCurrent(listing.token.clone());
+        let exp_current: i128 = env.storage().instance().get(&exp_key).unwrap_or(0);
+        let exp_new = safe_sub(exp_current, gross_refunded)?;
+        env.storage().instance().set(&exp_key, &exp_new);
+
         // Transfer net contribution back from financing pool to investor
         let token_client = token::Client::new(&env, &listing.token);
         token_client.transfer(&config.financing_pool, &investor, &net_contributed);
 
         // Claw back the investor's proportional fee share from the treasury (#450).
+        // The full fee (including any referrer-split portion, which is
+        // collected to the treasury) is reversed; the FeeContribution record
+        // is cleared so repeated claim_refund attempts cannot double-clawback.
         if fee_contributed > 0 {
             let treasury_client = kora_treasury::TreasuryContractClient::new(&env, &config.treasury);
             treasury_client.refund_fee(
@@ -1279,6 +1291,8 @@ impl MarketplaceContract {
                 &fee_contributed,
                 &investor,
             );
+            env.storage().persistent().remove(&fee_key);
+            events::fee_reversed(&env, &env.current_contract_address(), invoice_id, &investor, fee_contributed, &listing.token);
         }
 
         events::refund_claimed(&env, invoice_id, &investor, net_contributed);
