@@ -135,3 +135,12 @@ The contract is tested with a minimum of 90% coverage, including:
 ## Out of Scope
 
 Building the off-chain debtor communication/SMS relay itself is tracked under Backend. This contract only provides the on-chain attestation primitives.
+
+## Deployment & Configuration
+
+`scripts/deploy.sh` supports deploying and initializing `debtor_attestation` via the following environment variables:
+
+- `DEBTOR_ATTESTATION_ADMIN` — Admin address for the attestation contract (default: `$ADMIN`)
+- `DEBTOR_ATTESTATION_MAX_AGE` — Maximum attestation age in seconds (default: `2592000` / 30 days)
+- `DEBTOR_ATTESTATION_RELAYS` — Comma-separated list of initial relay addresses to whitelist (optional)
+- `AUTO_WIRE_ATTESTATION` — Set to `true` to auto-wire marketplace and invoice_nft settings post-deploy (default: `false`)

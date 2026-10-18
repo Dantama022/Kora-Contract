@@ -12,7 +12,7 @@
 #   - Contracts built: make build
 #
 # Dependency order (must match constructor requirements):
-#   access_control → invoice_nft / risk_registry / dispute_resolution
+#   access_control → invoice_nft / risk_registry / dispute_resolution / debtor_attestation
 #   → financing_pool → dispute_escrow → marketplace
 # =============================================================================
 # Environment Variables (all optional — defaults shown)
@@ -167,6 +167,9 @@ echo "  treasury       : $TREASURY_ID"
 DISPUTE_RESOLUTION_ID=$(deploy_contract "dispute_resolution" "$WASM_DIR/kora_dispute_resolution.wasm")
 echo "  dispute_resolution: $DISPUTE_RESOLUTION_ID"
 
+DEBTOR_ATTESTATION_ID=$(deploy_contract "debtor_attestation" "$WASM_DIR/kora_debtor_attestation.wasm")
+echo "  debtor_attestation: $DEBTOR_ATTESTATION_ID"
+
 POOL_ID=$(deploy_contract "financing_pool" "$WASM_DIR/kora_financing_pool.wasm")
 echo "  financing_pool : $POOL_ID"
 
@@ -212,6 +215,24 @@ invoke "$DISPUTE_RESOLUTION_ID" initialize \
   --admin "$ADMIN" \
   --access_control "$ACCESS_CONTROL_ID"
 echo "  dispute_resolution initialized"
+
+# Initialize debtor_attestation
+invoke "$DEBTOR_ATTESTATION_ID" initialize \
+  --admin "$DEBTOR_ATTESTATION_ADMIN" \
+  --max_attestation_age "$DEBTOR_ATTESTATION_MAX_AGE"
+echo "  debtor_attestation initialized (max age: ${DEBTOR_ATTESTATION_MAX_AGE}s)"
+
+# Add initial relays if provided
+if [ -n "$DEBTOR_ATTESTATION_RELAYS" ]; then
+  IFS=',' read -ra RELAYS <<< "$DEBTOR_ATTESTATION_RELAYS"
+  for relay in "${RELAYS[@]}"; do
+    relay=$(echo "$relay" | xargs)  # trim whitespace
+    if [ -n "$relay" ]; then
+      invoke "$DEBTOR_ATTESTATION_ID" add_relay --relay "$relay"
+      echo "  debtor_attestation relay added: $relay"
+    fi
+  done
+fi
 
 invoke "$POOL_ID" initialize \
   --admin "$ADMIN" \
@@ -276,6 +297,7 @@ MARKETPLACE_HASH=$(sha256sum "$WASM_DIR/kora_marketplace.wasm" | awk '{print $1}
 RISK_HASH=$(sha256sum "$WASM_DIR/kora_risk_registry.wasm" | awk '{print $1}')
 PRICE_ORACLE_HASH=$(sha256sum "$WASM_DIR/kora_price_oracle.wasm" | awk '{print $1}')
 GOVERNANCE_VOTING_HASH=$(sha256sum "$WASM_DIR/kora_governance_voting.wasm" | awk '{print $1}')
+DEBTOR_ATTESTATION_HASH=$(sha256sum "$WASM_DIR/kora_debtor_attestation.wasm" | awk '{print $1}')
 ESCROW_MANIFEST_ENTRY=""
 if [ "$DEPLOY_DISPUTE_ESCROW" = "true" ]; then
   DISPUTE_ESCROW_HASH=$(sha256sum "$WASM_DIR/kora_dispute_escrow.wasm" | awk '{print $1}')
@@ -335,6 +357,10 @@ cat > "$TEMP_MANIFEST" <<EOF
     "governance_voting": {
       "address": "$GOVERNANCE_VOTING_ID",
       "wasm_hash": "$GOVERNANCE_VOTING_HASH"
+    },
+    "debtor_attestation": {
+      "address": "$DEBTOR_ATTESTATION_ID",
+      "wasm_hash": "$DEBTOR_ATTESTATION_HASH"
     }
     $ESCROW_MANIFEST_ENTRY
   }
