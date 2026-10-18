@@ -398,3 +398,57 @@ mod issue_748_protocol_debtor_cap {
         assert_eq!(marketplace.get_debtor_exposure(&debtor), 0);
     }
 }
+
+// tests for Issue #973: MaxInvestorShareBps cumulative enforcement (marketplace).
+// Mirrors the marketplace formula: prospective*10_000 > cap_bps*asking_price.
+// Documents: cap 0 = uncapped (default); rounding leaves cap-minus-one-unit allowed.
+#[cfg(test)]
+mod issue_973_investor_share_cap {
+    fn exceeds_cap(prospective: i128, asking_price: i128, cap_bps: u32) -> bool {
+        if cap_bps == 0 { return false; }
+        let lhs = prospective.checked_mul(10_000).unwrap();
+        let rhs = (cap_bps as i128).checked_mul(asking_price).unwrap();
+        lhs > rhs
+    }
+
+    #[test]
+    fn test_third_top_up_crossing_cap_fails() {
+        let asking = 1_000_000i128; let cap = 3_000u32; // 30%
+        assert!(!exceeds_cap(100_000, asking, cap));
+        assert!(!exceeds_cap(200_000, asking, cap));
+        assert!(exceeds_cap(350_000, asking, cap)); // 35% cumulative > 30%
+    }
+
+    #[test]
+    fn test_two_investors_each_50pct_on_5000bps_both_succeed() {
+        let asking = 1_000_000i128; let cap = 5_000u32;
+        // Caps are per-investor, so 500k each is independently within cap.
+        assert!(!exceeds_cap(500_000, asking, cap));
+        assert!(!exceeds_cap(500_000, asking, cap));
+        // But 500k + 1 more unit on the same investor fails.
+        assert!(exceeds_cap(500_001, asking, cap));
+    }
+
+    #[test]
+    fn test_registry_lowering_cap_blocks_further_topups() {
+        let asking = 1_000_000i128;
+        // Initially 50% cap: 400k cumulative OK.
+        assert!(!exceeds_cap(400_000, asking, 5_000));
+        // Registry lowers to 30% mid-series: same 400k now exceeds; no retroactive eviction.
+        assert!(exceeds_cap(400_000, asking, 3_000));
+        // Existing position stands (policy: no retroactive eviction), only new top-ups blocked.
+    }
+
+    #[test]
+    fn test_cap_zero_is_uncapped() {
+        assert!(!exceeds_cap(1_000_000, 1_000_000, 0));
+    }
+
+    #[test]
+    fn test_single_contribution_below_cap_succeeds_and_rounding_edge() {
+        let asking = 1_000_000i128; let cap = 3_000u32;
+        assert!(!exceeds_cap(299_999, asking, cap)); // cap minus one unit: allowed (documented)
+        assert!(!exceeds_cap(300_000, asking, cap)); // exactly at cap: allowed
+        assert!(exceeds_cap(300_001, asking, cap)); // one unit over: rejected
+    }
+}

@@ -107,6 +107,7 @@ pub enum AdminActionType {
     CorrectMetadataHash,
     UpdateMetadataCid,
     InvoiceNftSetRiskRegistry,
+    InvoiceNftSetDebtorAttestation,
     InvoiceNftSetAuthorizedCallers,
     InvoiceNftSetDefaulted,
     InvoiceNftFreezeInvoice,
