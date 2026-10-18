@@ -99,6 +99,15 @@ pub struct ModelPosition {
     pub yield_claimed: i128,
 }
 
+/// Freeze overlay mirroring `invoice_nft::is_invoice_frozen` semantics.
+/// When `Frozen`, fund (`record_position`) and repay/position transitions are
+/// blocked while read-only views remain legal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FreezeOverlay {
+    Active,
+    Frozen,
+}
+
 /// Complete model state for one pool.
 #[derive(Debug, Clone)]
 pub struct PoolState {
@@ -107,6 +116,10 @@ pub struct PoolState {
     /// Running balance of the pool's token account.
     /// Starts at 0, increases on funding and each repayment, decreases on distribution.
     pub balance: i128,
+    /// Freeze overlay flag. `Frozen` blocks `record_position` and
+    /// `repay_partial` transitions (mirrors the runtime
+    /// `is_invoice_frozen` guard in `financing_pool`).
+    pub freeze: FreezeOverlay,
     /// Token decimals for this pool (fixed to TOKEN_DECIMALS in the primary model;
     /// ALT_TOKEN_DECIMALS in the multi-asset extension).
     pub token_decimals: u32,
@@ -165,7 +178,24 @@ impl PoolState {
             positions: Vec::new(),
             balance: 0,
             token_decimals,
+            freeze: FreezeOverlay::Active,
         }
+    }
+
+    /// Freeze the pool: blocks fund and repay transitions (read-only stays legal).
+    /// Idempotent: freezing twice keeps the overlay `Frozen`.
+    pub fn freeze(&mut self) {
+        self.freeze = FreezeOverlay::Frozen;
+    }
+
+    /// Unfreeze the pool, restoring previously legal transitions. Idempotent.
+    pub fn unfreeze(&mut self) {
+        self.freeze = FreezeOverlay::Active;
+    }
+
+    /// Read-only view: legal regardless of the freeze overlay.
+    pub fn total_owed_view(&self) -> i128 {
+        self.pool.total_owed
     }
 
     /// Create a new pool with no investors and no funding (standard 7-decimal token).
@@ -176,7 +206,11 @@ impl PoolState {
     /// Record an investor position.  Mirrors `record_position` in the contract.
     /// `contributed` must be > 0 and <= remaining unfunded amount.
     /// Returns Err if the position is invalid.
+    /// Blocked while the freeze overlay is active (mirrors `is_invoice_frozen`).
     pub fn record_position(&mut self, contributed: i128) -> Result<(), &'static str> {
+        if self.freeze == FreezeOverlay::Frozen {
+            return Err("pool frozen: funding blocked");
+        }
         if contributed <= 0 {
             return Err("contributed must be > 0");
         }
@@ -222,6 +256,9 @@ impl PoolState {
     /// ## I5 check
     /// `new_repaid_amount <= total_owed` must hold; exceeding it is rejected.
     pub fn repay_partial(&mut self, amount: i128) -> Result<Vec<i128>, String> {
+        if self.freeze == FreezeOverlay::Frozen {
+            return Err("pool frozen: repayment blocked".to_string());
+        }
         if amount <= 0 {
             return Err("partial repayment amount must be > 0".to_string());
         }

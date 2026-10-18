@@ -128,3 +128,34 @@ fn formal_adversarial_scenarios() {
         Err(e) => panic!("FORMAL VIOLATION (adversarial):\n{}", e),
     }
 }
+
+// ── Freeze overlay (invoice_nft::is_invoice_frozen) ───────────────────────────
+
+/// Invariant: no position increment and no contribution increase while the
+/// freeze overlay is active; unfreeze restores previously legal transitions.
+/// Covers freeze-on-then-attempt-fund plus freeze-during-partial-repay.
+#[test]
+fn formal_freeze_overlay_blocks_fund_and_positions() {
+    use kora_financing_pool::verification::model::{FreezeOverlay, PoolState};
+    let mut s = PoolState::new(100_000_000);
+    assert!(s.record_position(10_000_000).is_ok());
+    let funded_before = s.pool.total_funded;
+    let positions_before = s.positions.len();
+    s.freeze();
+    assert_eq!(s.freeze, FreezeOverlay::Frozen);
+    // Freeze-on then attempt fund: must be rejected, state unchanged.
+    assert!(s.record_position(10_000_000).is_err());
+    assert!(s.repay_partial(1_000_000).is_err());
+    assert_eq!(s.pool.total_funded, funded_before);
+    assert_eq!(s.positions.len(), positions_before);
+    // Read-only views stay legal while frozen.
+    let _ = s.total_owed_view();
+    // Double-freeze is idempotent.
+    s.freeze();
+    assert!(s.record_position(1).is_err());
+    // Unfreeze restores previously legal transitions.
+    s.unfreeze();
+    assert!(s.record_position(10_000_000).is_ok());
+    assert_eq!(s.positions.len(), positions_before + 1);
+    println!("freeze overlay: fund blocked while frozen, restored after unfreeze");
+}
