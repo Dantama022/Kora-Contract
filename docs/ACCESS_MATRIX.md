@@ -181,6 +181,8 @@ fn require_admin(&env, caller: &Address) -> Result<(), AccessControlError> {
 | `migrate` | Permissionless | Delegates to migrate_versions (Admin) | Version stepper |
 | `migrate_versions` | **Admin** | Adjacent-step migration only | Audited when changed |
 | `set_risk_registry` | **Admin** | Wires risk registry address | Audited |
+| `set_debtor_attestation` | **Admin** | Wires debtor attestation address; rejects self address; idempotent on re-set | Audited; emits `DEP_EXEC` (tag 7) |
+| `get_debtor_attestation` | Permissionless | Read-only | Returns configured address or None |
 | `set_authorized_callers` | **Admin** | Wires marketplace and financing_pool | Rejects self/distinctness violations |
 | `set_protocol_config` | **Admin** | Validates max risk score | |
 | `get_protocol_config` | Permissionless | Read-only | Zeroed default when unset |

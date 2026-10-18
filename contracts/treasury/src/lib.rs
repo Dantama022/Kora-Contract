@@ -509,6 +509,53 @@ impl TreasuryContract {
         Ok(())
     }
 
+    /// Claw back a previously collected protocol fee to an investor on a
+    /// failed/cancelled listing refund. Only the authorized marketplace may
+    /// call this. Transfers `amount` of `token` from the treasury to
+    /// `investor` and decrements the `Collected` accounting ledger, including
+    /// any referrer-split portion (the full fee was collected to the treasury).
+    /// Fails with `InsufficientPoolBalance` when the treasury token balance
+    /// cannot cover the clawback (e.g. fees already spent via grants).
+    pub fn refund_fee(
+        env: Env,
+        caller: Address,
+        token: Address,
+        amount: i128,
+        investor: Address,
+    ) -> Result<(), TreasuryError> {
+        if amount <= 0 {
+            return Err(TreasuryError::InvalidAmount);
+        }
+        let marketplace: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Marketplace)
+            .ok_or(TreasuryError::NotInitialized)?;
+        if caller != marketplace {
+            return Err(TreasuryError::NotAdmin);
+        }
+        Self::require_whitelisted_token(&env, &token)?;
+        let live_balance = Self::get_balance_internal(&env, &token);
+        if amount > live_balance {
+            return Err(TreasuryError::InsufficientPoolBalance);
+        }
+        let collected: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Collected(token.clone()))
+            .unwrap_or(0);
+        let new_collected = collected
+            .checked_sub(amount)
+            .ok_or(TreasuryError::ArithmeticOverflow)?;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Collected(token.clone()), &new_collected);
+        Self::bump_persistent(&env, &DataKey::Collected(token.clone()));
+        Self::transfer_token(&env, &marketplace, &token, &investor, amount);
+        events::fee_reversed(&env, &caller, 0, &investor, amount, &token);
+        Ok(())
+    }
+
     /// Withdraw accumulated fees to a recipient. Admin only.
     ///
     /// The withdrawable balance excludes the loss-reserve amount per token

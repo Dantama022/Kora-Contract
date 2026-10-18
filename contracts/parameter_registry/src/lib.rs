@@ -7,6 +7,18 @@
 //! `treasury`) read from this registry rather than maintaining independent,
 //! disconnected parameter storage.
 //!
+//! ## Marketplace keys
+//!
+//! | Key | Type | Default | Description |
+//! |-----|------|---------|-------------|
+//! | `MarketplaceFeeBps` | i128 | `50` | Protocol fee in basis points (0–10_000) charged on each investor contribution. |
+//! | `ReferrerSplitBps` | i128 | `0` | Fraction of the protocol fee routed to the listing's referrer (0–10_000). |
+//! | `TierFeeAaa` | i128 | `0` | Override fee for AAA risk tier (0 = use flat `MarketplaceFeeBps`). |
+//! | `TierFeeAa` | i128 | `0` | Override fee for AA risk tier. |
+//! | `TierFeeA` | i128 | `0` | Override fee for A risk tier. |
+//! | `TierFeeB` | i128 | `0` | Override fee for B risk tier. |
+//! | `TierFeeC` | i128 | `0` | Override fee for C risk tier. |
+//!
 //! ## Write path
 //! Parameters are written **only** through a multisig governance proposal:
 //!   1. A configured signer calls `propose_param_update`.
@@ -209,7 +221,6 @@ impl ParameterRegistryContract {
         // Treasury
         Self::write_param(env, admin, now, RegistryParamKey::TreasuryFeeBps, 50, 0, 10_000);
         Self::write_param(env, admin, now, RegistryParamKey::ReserveAllocationBps, 1_000, 0, 5_000);
-        Self::write_param(env, admin, now, RegistryParamKey::MinReserveRatioBps, 1_000, 0, 10_000);
     }
 
     fn write_param(
@@ -553,24 +564,7 @@ impl ParameterRegistryContract {
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     fn get_parameter_raw(env: &Env, key: &RegistryParamKey) -> Option<RegistryParam> {
-        let stored = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Param(key.clone()));
-        if stored.is_some() {
-            return stored;
-        }
-        if key == &RegistryParamKey::MinReserveRatioBps {
-            let admin: Address = env.storage().instance().get(&DataKey::Admin)?;
-            return Some(RegistryParam {
-                value: 1_000,
-                min_value: 0,
-                max_value: 10_000,
-                updated_at: 0,
-                updated_by: admin,
-            });
-        }
-        None
+        env.storage().persistent().get(&DataKey::Param(key.clone()))
     }
 
     fn apply_param_update(
@@ -632,8 +626,7 @@ impl ParameterRegistryContract {
             | RegistryParamKey::MaxPositionBps
             | RegistryParamKey::SlashPercentageBps
             | RegistryParamKey::TreasuryFeeBps
-            | RegistryParamKey::ReserveAllocationBps
-            | RegistryParamKey::MinReserveRatioBps => {
+            | RegistryParamKey::ReserveAllocationBps => {
                 if value < 0 || value > 10_000 {
                     return Err(RegistryError::ParamValueOutOfBounds);
                 }
@@ -734,7 +727,6 @@ impl ParameterRegistryContract {
             RegistryParamKey::MinimumDebtorScore => 15,
             RegistryParamKey::TreasuryFeeBps => 16,
             RegistryParamKey::ReserveAllocationBps => 17,
-            RegistryParamKey::MinReserveRatioBps => 18,
         }
     }
 
@@ -831,8 +823,6 @@ mod tests {
         // minimum debtor score default = 0
         let score = client.get_value(&RegistryParamKey::MinimumDebtorScore);
         assert_eq!(score, 0);
-        let reserve_ratio = client.get_value(&RegistryParamKey::MinReserveRatioBps);
-        assert_eq!(reserve_ratio, 1_000);
     }
 
     #[test]
