@@ -310,6 +310,25 @@ pub fn fee_withdrawn(env: &Env, actor: &Address, token: &Address, amount: i128) 
     );
 }
 
+/// Schema: (actor=marketplace, invoice_id, investor, amount, token, timestamp)
+/// Emitted when a protocol fee is clawed back from the treasury to an
+/// investor on a failed/cancelled listing refund. `invoice_id` of 0 is used
+/// when the reversal is not tied to a single listing.
+pub fn fee_reversed(env: &Env, marketplace: &Address, invoice_id: u64, investor: &Address, amount: i128, token: &Address) {
+    emit(
+        env,
+        symbol_short!("FEE_REV"),
+        (
+            marketplace.clone(),
+            invoice_id,
+            investor.clone(),
+            amount,
+            token.clone(),
+            env.ledger().timestamp(),
+        ),
+    );
+}
+
 /// Schema: (actor=admin, token, amount, timestamp)
 pub fn emergency_withdrawn(env: &Env, by: &Address, token: &Address, amount: i128) {
     emit(

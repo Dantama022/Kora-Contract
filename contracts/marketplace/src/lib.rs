@@ -1280,6 +1280,9 @@ impl MarketplaceContract {
         token_client.transfer(&config.financing_pool, &investor, &net_contributed);
 
         // Claw back the investor's proportional fee share from the treasury (#450).
+        // The full fee (including any referrer-split portion, which is
+        // collected to the treasury) is reversed; the FeeContribution record
+        // is cleared so repeated claim_refund attempts cannot double-clawback.
         if fee_contributed > 0 {
             let treasury_client = kora_treasury::TreasuryContractClient::new(&env, &config.treasury);
             treasury_client.refund_fee(
@@ -1288,6 +1291,8 @@ impl MarketplaceContract {
                 &fee_contributed,
                 &investor,
             );
+            env.storage().persistent().remove(&fee_key);
+            events::fee_reversed(&env, &env.current_contract_address(), invoice_id, &investor, fee_contributed, &listing.token);
         }
 
         events::refund_claimed(&env, invoice_id, &investor, net_contributed);
