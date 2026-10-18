@@ -212,6 +212,8 @@ pub enum DataKey {
     FinancingPool,
     /// Authorized risk registry contract address.
     RiskRegistry,
+    /// Debtor attestation contract address (discoverable per deployment).
+    DebtorAttestation,
     /// Protocol-wide configuration.
     ProtocolConfig,
     /// Next write position in the admin audit ring buffer.
@@ -456,6 +458,33 @@ impl InvoiceNftContract {
         env.storage().instance().set(&DataKey::RiskRegistry, &risk_registry);
         Self::append_audit_entry(&env, &admin, AdminActionType::InvoiceNftSetRiskRegistry);
         Ok(())
+    }
+
+    /// Configure the debtor attestation contract address. Admin only.
+    ///
+    /// Mirrors other external contract pointers (`set_risk_registry`).
+    /// Rejects the contract's own address as a zero-address sentinel guard
+    /// via `require_not_self`; fails with `NotInitialized` when
+    /// `access_control` is unset and `NotAdmin` for non-admin callers.
+    pub fn set_debtor_attestation(env: Env, admin: Address, attestation: Address) -> Result<(), InvoiceNftError> {
+        admin.require_auth();
+        Self::require_admin(&env, &admin)?;
+        kora_shared::validation::require_not_self(&env, &attestation)?;
+        let old: Option<Address> = env.storage().instance().get(&DataKey::DebtorAttestation);
+        if old.as_ref() == Some(&attestation) {
+            return Ok(());
+        }
+        env.storage().instance().set(&DataKey::DebtorAttestation, &attestation);
+        Self::append_audit_entry(&env, &admin, AdminActionType::InvoiceNftSetDebtorAttestation);
+        // Standardized configuration event; field_tag 7 = debtor_attestation.
+        let zero = Address::generate(&env);
+        events::dependency_updated(&env, &admin, 7u32, old.as_ref().unwrap_or(&zero), &attestation);
+        Ok(())
+    }
+
+    /// Read-only getter used by marketplace attestation checks and indexers.
+    pub fn get_debtor_attestation(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::DebtorAttestation)
     }
 
     pub fn set_authorized_callers(
