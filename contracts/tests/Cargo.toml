@@ -51,6 +51,10 @@ path = "issue_471_secondary_market_settlement.rs"
 name = "secondary_market_fee_routing"
 path = "secondary_market_fee_routing.rs"
 
+[[test]]
+name = "marketplace_fx_manipulation"
+path = "marketplace_fx_manipulation.rs"
+
 # ── Security regression suites (#611–#614) ────────────────────────────────────
 [[test]]
 name = "security_regression_audit_log"
