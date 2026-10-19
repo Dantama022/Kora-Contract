@@ -936,6 +936,20 @@ impl MarketplaceContract {
         let fee_key = DataKey::FeeContribution(invoice_id, investor.clone());
         let prev_fee: i128 = env.storage().persistent().get(&fee_key).unwrap_or(0);
         let fee_after = safe_add(prev_fee, fee)?;
+
+        // Track investor in ListingInvestors if this is their first contribution
+        if prev_contrib == 0 {
+            let investors_key = DataKey::ListingInvestors(invoice_id);
+            let mut investors: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&investors_key)
+                .unwrap_or_else(|| Vec::new(&env));
+            investors.push_back(investor.clone());
+            env.storage().persistent().set(&investors_key, &investors);
+            Self::bump_persistent(env, &investors_key);
+        }
+
         Self::add_debtor_exposure(env, &invoice.debtor_hash, invoice_id, listing_amount)?;
 
         let pay_token_client = token::Client::new(env, &pay_token);
@@ -991,8 +1005,10 @@ impl MarketplaceContract {
     }
 
     /// Cancel a listing. Caller must be seller or admin.
-    /// Works for listings with no investor funding (funded_amount == 0).
-    /// For partially-funded listings prefer `request_cancellation` + `admin_confirm_cancellation`.
+    /// If the listing has no investor funding (funded_amount == 0), cancels immediately.
+    /// If the listing has partial investor funding, refunds all investors pro-rata
+    /// by transferring net contributions from the financing pool and clawing back
+    /// fee contributions from the treasury, then decrements exposure counters.
     pub fn cancel_listing(env: Env, caller: Address, invoice_id: u64) -> Result<(), KoraError> {
         caller.require_auth();
 
@@ -1011,6 +1027,89 @@ impl MarketplaceContract {
             return Err(KoraError::Unauthorized);
         }
 
+        // If listing has partial funding, refund all investors before cancelling
+        if listing.funded_amount > 0 {
+            // Get all investors who contributed to this listing
+            let investors: Vec<Address> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::ListingInvestors(invoice_id))
+                .unwrap_or_else(|| Vec::new(&env));
+
+            let token_client = token::Client::new(&env, &listing.token);
+            let nft_client = kora_invoice_nft::InvoiceNftContractClient::new(&env, &config.invoice_nft);
+            let invoice = nft_client.get_invoice(&invoice_id);
+
+            // Refund each investor
+            for investor in investors.iter() {
+                let contrib_key = DataKey::Contribution(invoice_id, investor.clone());
+                let net_contributed: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&contrib_key)
+                    .unwrap_or(0);
+
+                if net_contributed <= 0 {
+                    continue;
+                }
+
+                let fee_key = DataKey::FeeContribution(invoice_id, investor.clone());
+                let fee_contributed: i128 = env.storage().persistent().get(&fee_key).unwrap_or(0);
+
+                // CEI: mark refund as claimed before external calls to prevent reentrancy
+                let refund_key = DataKey::RefundClaimed(invoice_id, investor.clone());
+                env.storage().persistent().set(&refund_key, &true);
+
+                // Remove debtor exposure for the gross amount (net + fee)
+                let gross_contributed = safe_add(net_contributed, fee_contributed)?;
+                Self::remove_debtor_exposure(
+                    &env,
+                    &invoice.debtor_hash,
+                    invoice_id,
+                    gross_contributed,
+                )?;
+
+                // Decrement token exposure by the gross refunded amount
+                let exp_key = DataKey::TokenExposureCurrent(listing.token.clone());
+                let exp_current: i128 = env.storage().instance().get(&exp_key).unwrap_or(0);
+                let exp_new = safe_sub(exp_current, gross_contributed)?;
+                env.storage().instance().set(&exp_key, &exp_new);
+
+                // Transfer net contribution back from financing pool to investor
+                token_client.transfer(&config.financing_pool, &investor, &net_contributed);
+
+                // Claw back the investor's proportional fee share from the treasury
+                if fee_contributed > 0 {
+                    let treasury_client =
+                        kora_treasury::TreasuryContractClient::new(&env, &config.treasury);
+                    treasury_client.refund_fee(
+                        &env.current_contract_address(),
+                        &listing.token,
+                        &fee_contributed,
+                        &investor,
+                    );
+                    env.storage().persistent().remove(&fee_key);
+                    events::fee_reversed(
+                        &env,
+                        &env.current_contract_address(),
+                        invoice_id,
+                        &investor,
+                        fee_contributed,
+                        &listing.token,
+                    );
+                }
+
+                // Clear contribution record
+                env.storage().persistent().remove(&contrib_key);
+
+                events::refund_claimed(&env, invoice_id, &investor, net_contributed);
+            }
+
+            // Clear the investors list
+            env.storage().persistent().remove(&DataKey::ListingInvestors(invoice_id));
+        }
+
+        // Mark listing as inactive
         listing.is_active = false;
         // Listing is no longer outstanding marketplace exposure (#447).
         Self::remove_token_exposure(&env, &listing.token, listing.asking_price);
