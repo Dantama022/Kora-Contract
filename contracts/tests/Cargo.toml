@@ -48,6 +48,10 @@ name = "issue_471_secondary_market_settlement"
 path = "issue_471_secondary_market_settlement.rs"
 
 [[test]]
+name = "issue_priority_window_funding"
+path = "issue_priority_window_funding.rs"
+
+[[test]]
 name = "secondary_market_fee_routing"
 path = "secondary_market_fee_routing.rs"
 
@@ -100,4 +104,3 @@ kora-access-control = { path = "../access_control" }
 kora-price-oracle = { path = "../price_oracle" }
 kora-referral-rewards = { path = "../referral_rewards" }
 kora-secondary-market = { path = "../secondary_market" }
-
