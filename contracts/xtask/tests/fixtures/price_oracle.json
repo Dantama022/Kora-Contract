@@ -1,0 +1,907 @@
+{
+  "name": "price_oracle",
+  "version": "1.0.0",
+  "functions": [
+    {
+      "name": "add_feeder",
+      "doc": "Add an authorized feeder. Admin only.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "feeder",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "clear_peg_flag",
+      "doc": "Clear a peg-deviation flag so price submissions for the pair can resume.\nAdmin only.\n\n**Errors:**\n- `PriceOracleError::NotAdmin` — caller is not the admin.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "convert",
+      "doc": "Convert an amount from one currency to another using the stored price.\nFirst attempts direct pair conversion. If unavailable, triangulates through\nthe configured base currency. Rejects stale or missing prices.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "from",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "to",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<i128, PriceOracleError>"
+    },
+    {
+      "name": "convert_with_decimals",
+      "doc": "Convert an amount between currencies with decimal precision correction.\nApplies: amount_out = (amount_in * price_ratio / 1e7) * 10^(to_decimals - from_decimals)\nThis corrects for differing token decimal places (e.g., 6 vs 7 decimal tokens).\n\n**Parameters:**\n- `amount` — The input amount in `from` currency's smallest unit.\n- `from` — Source currency symbol.\n- `to` — Target currency symbol.\n- `from_decimals` — Decimal places of the `from` token (typically 6 or 7).\n- `to_decimals` — Decimal places of the `to` token (typically 6 or 7).\n\n**Returns:** Converted amount in `to` currency's smallest unit.\n\n**Errors:**\n- `PriceOracleError::ArithmeticOverflow` — Multiplication or division overflowed.\n- `PriceOracleError::InvalidAmount` — Price not found, stale, or result is ≤ 0.\n- `PriceOracleError::InvoiceExpired` — Price data is older than MAX_STALENESS_SECS.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "from",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "to",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "from_decimals",
+          "param_type": "u32"
+        },
+        {
+          "name": "to_decimals",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<i128, PriceOracleError>"
+    },
+    {
+      "name": "execute_upgrade",
+      "doc": "Execute a previously proposed upgrade after the 24-hour timelock.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "get_fallback_feed",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Option<Address>"
+    },
+    {
+      "name": "get_max_staleness",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "u64"
+    },
+    {
+      "name": "get_peg_config",
+      "doc": "Read the peg configuration for a pair.\n\nReturns `None` if no peg config has been registered.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Option<PegConfig>"
+    },
+    {
+      "name": "get_price",
+      "doc": "Get the aggregated price for a pair (median of all active feeders).\nReturns the median price and its oldest (non-stale) timestamp.\nFails if no feeders have submitted a non-stale price.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<PriceData, PriceOracleError>"
+    },
+    {
+      "name": "get_price_at",
+      "doc": "Return the retained aggregated price snapshot nearest to `timestamp`\nwithout going past it (the price as of that moment). Errors with\n`PriceHistoryNotAvailable` when no history exists for the pair or when\n`timestamp` predates the oldest snapshot still in the ring.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "timestamp",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<PriceData, PriceOracleError>"
+    },
+    {
+      "name": "initialize",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "access_control",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "is_peg_flagged",
+      "doc": "Returns `true` if the pair is currently flagged due to a peg deviation.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "bool"
+    },
+    {
+      "name": "propose_upgrade",
+      "doc": "Propose a WASM upgrade with a 24-hour timelock. Admin only.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "new_wasm_hash",
+          "param_type": "BytesN<32>"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "remove_fallback_feed",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "remove_feeder",
+      "doc": "Remove an authorized feeder. Admin only.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "feeder",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "remove_peg_config",
+      "doc": "Remove a peg configuration for a pair. Admin only.\n\n**Errors:**\n- `PriceOracleError::NotAdmin` — caller is not the admin.\n- `PriceOracleError::PegNotConfigured` — no peg config exists for this pair.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_access_control",
+      "doc": "Set the access_control contract address. Admin only.\nUsed for post-deployment wiring or migration.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "access_control",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_base_currency",
+      "doc": "Set the base currency for multi-hop triangulation. Admin only.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_fallback_feed",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "fallback_address",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_max_deviation",
+      "doc": "Set the maximum allowed price deviation in basis points.\nAdmin only. Default is 1000 (10%).",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "deviation_bps",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_max_staleness",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "max_staleness_secs",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_peg_config",
+      "doc": "Register or update a peg configuration for a currency pair. Admin only.\n\nOnce set, every `set_price` submission for `(base, quote)` is validated\nagainst `expected_ratio ± tolerance_bps`.  A `PEG_DEV` event is emitted\non deviation; if `auto_flag` is true the pair is also flagged, which\nblocks further price submissions until `clear_peg_flag` is called.\n\n**Parameters:**\n- `expected_ratio` — expected price at peg, 1e7-scaled (e.g. 10_000_000 for 1:1).\n- `tolerance_bps`  — allowed deviation in basis points (50 = 0.5%).\n\n**Errors:**\n- `PriceOracleError::NotAdmin` — caller is not the admin.\n- `PriceOracleError::InvalidAmount` — `expected_ratio <= 0` or `tolerance_bps > 10_000`.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "expected_ratio",
+          "param_type": "i128"
+        },
+        {
+          "name": "tolerance_bps",
+          "param_type": "u32"
+        },
+        {
+          "name": "auto_flag",
+          "param_type": "bool"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "set_price",
+      "doc": "Set a price for a currency pair. Authorized feeders only.\nPrice is expressed as `base` units per 1 unit of `quote`, scaled by 1e7 (stroops).\nBlocked when the protocol is paused.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "feeder",
+          "param_type": "Address"
+        },
+        {
+          "name": "base",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "quote",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "price",
+          "param_type": "i128"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    },
+    {
+      "name": "transfer_admin",
+      "doc": "Transfer admin rights to a new address. Admin only.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "new_admin",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), PriceOracleError>"
+    }
+  ],
+  "types": [
+    {
+      "name": "DataKey",
+      "kind": "union",
+      "fields": [
+        {
+          "name": "Admin",
+          "field_type": "void"
+        },
+        {
+          "name": "AccessControl",
+          "field_type": "void"
+        },
+        {
+          "name": "Price",
+          "field_type": "(Symbol, Symbol)"
+        },
+        {
+          "name": "UpgradeProposal",
+          "field_type": "void"
+        },
+        {
+          "name": "Feeder",
+          "field_type": "Address",
+          "doc": "Authorized price feeder flag."
+        },
+        {
+          "name": "FeederPrice",
+          "field_type": "(Symbol, Symbol, Address)",
+          "doc": "A single feeder's submitted price for a (base, quote) pair."
+        },
+        {
+          "name": "PriceFeeders",
+          "field_type": "(Symbol, Symbol)",
+          "doc": "Enumerable list of feeders that have submitted a price for a pair."
+        },
+        {
+          "name": "PriceHistory",
+          "field_type": "(Symbol, Symbol)",
+          "doc": "Bounded rolling history of aggregated price snapshots for a pair."
+        },
+        {
+          "name": "BaseCurrency",
+          "field_type": "void"
+        },
+        {
+          "name": "MaxDeviation",
+          "field_type": "void"
+        },
+        {
+          "name": "MaxRateChange",
+          "field_type": "(Symbol, Symbol)",
+          "doc": "Maximum allowed price change per update in basis points (e.g., 2000 = 20%).\nConfigured per currency pair. Prevents single-update manipulation attacks."
+        },
+        {
+          "name": "PegConfig",
+          "field_type": "(Symbol, Symbol)",
+          "doc": "Peg configuration for a specific (base, quote) pair (#589)."
+        },
+        {
+          "name": "PegFlagged",
+          "field_type": "(Symbol, Symbol)",
+          "doc": "Set to `true` when a peg deviation has been detected and `auto_flag` is enabled.\nCleared by admin via `clear_peg_flag`. Blocks further `set_price` submissions."
+        },
+        {
+          "name": "MaxStaleness",
+          "field_type": "(Symbol, Symbol)"
+        },
+        {
+          "name": "FallbackFeed",
+          "field_type": "(Symbol, Symbol)"
+        }
+      ]
+    },
+    {
+      "name": "PegConfig",
+      "kind": "struct",
+      "doc": "Peg configuration for a stablecoin / pegged pair (#589).\n\nFeeders submitting a price for `(base, quote)` that deviates from\n`expected_ratio` by more than `tolerance_bps` basis points will trigger\na `PEG_DEV` event.  If `auto_flag` is `true`, the pair is additionally\nmarked as flagged (see `DataKey::PegFlagged`), which causes `set_price`\nto reject further submissions until an admin clears the flag.\n\n`expected_ratio` uses the same 1e7 scale as all other prices in this\ncontract (e.g. USDC/USD ≈ 10_000_000 = 1.0000000).",
+      "fields": [
+        {
+          "name": "auto_flag",
+          "field_type": "bool",
+          "doc": "When true, a deviation event also flags the pair and blocks further\nprice submissions until an admin calls `clear_peg_flag`."
+        },
+        {
+          "name": "base",
+          "field_type": "Symbol",
+          "doc": "Base currency symbol (e.g. `USDC`)."
+        },
+        {
+          "name": "expected_ratio",
+          "field_type": "i128",
+          "doc": "Expected price ratio at peg, scaled by 1e7 (e.g. 10_000_000 for 1:1)."
+        },
+        {
+          "name": "quote",
+          "field_type": "Symbol",
+          "doc": "Quote currency symbol (e.g. `USD`)."
+        },
+        {
+          "name": "tolerance_bps",
+          "field_type": "u32",
+          "doc": "Allowed deviation from `expected_ratio` in basis points (e.g. 50 = 0.5%)."
+        }
+      ]
+    },
+    {
+      "name": "PriceData",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "timestamp",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "PriceHistoryRing",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "next",
+          "field_type": "u32"
+        },
+        {
+          "name": "slots",
+          "field_type": "Vec<PriceData>"
+        }
+      ]
+    },
+    {
+      "name": "PriceOracleError",
+      "kind": "error_enum",
+      "fields": [
+        {
+          "name": "AlreadyInitialized",
+          "field_type": "1"
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "field_type": "2"
+        },
+        {
+          "name": "InvalidAmount",
+          "field_type": "3"
+        },
+        {
+          "name": "InvoiceExpired",
+          "field_type": "4"
+        },
+        {
+          "name": "NotAdmin",
+          "field_type": "5"
+        },
+        {
+          "name": "NotInitialized",
+          "field_type": "6"
+        },
+        {
+          "name": "NoUpgradeProposed",
+          "field_type": "7"
+        },
+        {
+          "name": "UpgradeTimelockNotElapsed",
+          "field_type": "8"
+        },
+        {
+          "name": "ProtocolPaused",
+          "field_type": "9"
+        },
+        {
+          "name": "NotFeeder",
+          "field_type": "10"
+        },
+        {
+          "name": "PegDeviationExceeded",
+          "field_type": "11",
+          "doc": "Price submitted for a pegged pair is outside the configured tolerance."
+        },
+        {
+          "name": "PegAlreadyConfigured",
+          "field_type": "12",
+          "doc": "A PegConfig already exists for this (base, quote) pair."
+        },
+        {
+          "name": "PegNotConfigured",
+          "field_type": "13",
+          "doc": "No PegConfig found for this (base, quote) pair."
+        },
+        {
+          "name": "PriceHistoryNotAvailable",
+          "field_type": "14"
+        },
+        {
+          "name": "AllFeedsStale",
+          "field_type": "15"
+        },
+        {
+          "name": "FallbackNotConfigured",
+          "field_type": "16"
+        },
+        {
+          "name": "RateChangeExceeded",
+          "field_type": "17",
+          "doc": "Price update rejected: change vs. the previous price exceeds the\nconfigured max-rate-of-change circuit breaker."
+        }
+      ]
+    }
+  ],
+  "structs": [
+    {
+      "name": "PegConfig",
+      "doc": "Peg configuration for a stablecoin / pegged pair (#589).\n\nFeeders submitting a price for `(base, quote)` that deviates from\n`expected_ratio` by more than `tolerance_bps` basis points will trigger\na `PEG_DEV` event.  If `auto_flag` is `true`, the pair is additionally\nmarked as flagged (see `DataKey::PegFlagged`), which causes `set_price`\nto reject further submissions until an admin clears the flag.\n\n`expected_ratio` uses the same 1e7 scale as all other prices in this\ncontract (e.g. USDC/USD ≈ 10_000_000 = 1.0000000).",
+      "fields": [
+        {
+          "name": "auto_flag",
+          "field_type": "bool",
+          "doc": "When true, a deviation event also flags the pair and blocks further\nprice submissions until an admin calls `clear_peg_flag`."
+        },
+        {
+          "name": "base",
+          "field_type": "Symbol",
+          "doc": "Base currency symbol (e.g. `USDC`)."
+        },
+        {
+          "name": "expected_ratio",
+          "field_type": "i128",
+          "doc": "Expected price ratio at peg, scaled by 1e7 (e.g. 10_000_000 for 1:1)."
+        },
+        {
+          "name": "quote",
+          "field_type": "Symbol",
+          "doc": "Quote currency symbol (e.g. `USD`)."
+        },
+        {
+          "name": "tolerance_bps",
+          "field_type": "u32",
+          "doc": "Allowed deviation from `expected_ratio` in basis points (e.g. 50 = 0.5%)."
+        }
+      ]
+    },
+    {
+      "name": "PriceData",
+      "fields": [
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "timestamp",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "PriceHistoryRing",
+      "fields": [
+        {
+          "name": "next",
+          "field_type": "u32"
+        },
+        {
+          "name": "slots",
+          "field_type": "Vec<PriceData>"
+        }
+      ]
+    }
+  ],
+  "unions": [
+    {
+      "name": "DataKey",
+      "cases": [
+        {
+          "name": "Admin",
+          "tuple_types": []
+        },
+        {
+          "name": "AccessControl",
+          "tuple_types": []
+        },
+        {
+          "name": "Price",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "UpgradeProposal",
+          "tuple_types": []
+        },
+        {
+          "name": "Feeder",
+          "doc": "Authorized price feeder flag.",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "FeederPrice",
+          "doc": "A single feeder's submitted price for a (base, quote) pair.",
+          "tuple_types": [
+            "Symbol",
+            "Symbol",
+            "Address"
+          ]
+        },
+        {
+          "name": "PriceFeeders",
+          "doc": "Enumerable list of feeders that have submitted a price for a pair.",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "PriceHistory",
+          "doc": "Bounded rolling history of aggregated price snapshots for a pair.",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "BaseCurrency",
+          "tuple_types": []
+        },
+        {
+          "name": "MaxDeviation",
+          "tuple_types": []
+        },
+        {
+          "name": "MaxRateChange",
+          "doc": "Maximum allowed price change per update in basis points (e.g., 2000 = 20%).\nConfigured per currency pair. Prevents single-update manipulation attacks.",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "PegConfig",
+          "doc": "Peg configuration for a specific (base, quote) pair (#589).",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "PegFlagged",
+          "doc": "Set to `true` when a peg deviation has been detected and `auto_flag` is enabled.\nCleared by admin via `clear_peg_flag`. Blocks further `set_price` submissions.",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "MaxStaleness",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        },
+        {
+          "name": "FallbackFeed",
+          "tuple_types": [
+            "Symbol",
+            "Symbol"
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "name": "PriceOracleError",
+      "cases": [
+        {
+          "name": "AlreadyInitialized",
+          "value": 1
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "value": 2
+        },
+        {
+          "name": "InvalidAmount",
+          "value": 3
+        },
+        {
+          "name": "InvoiceExpired",
+          "value": 4
+        },
+        {
+          "name": "NotAdmin",
+          "value": 5
+        },
+        {
+          "name": "NotInitialized",
+          "value": 6
+        },
+        {
+          "name": "NoUpgradeProposed",
+          "value": 7
+        },
+        {
+          "name": "UpgradeTimelockNotElapsed",
+          "value": 8
+        },
+        {
+          "name": "ProtocolPaused",
+          "value": 9
+        },
+        {
+          "name": "NotFeeder",
+          "value": 10
+        },
+        {
+          "name": "PegDeviationExceeded",
+          "doc": "Price submitted for a pegged pair is outside the configured tolerance.",
+          "value": 11
+        },
+        {
+          "name": "PegAlreadyConfigured",
+          "doc": "A PegConfig already exists for this (base, quote) pair.",
+          "value": 12
+        },
+        {
+          "name": "PegNotConfigured",
+          "doc": "No PegConfig found for this (base, quote) pair.",
+          "value": 13
+        },
+        {
+          "name": "PriceHistoryNotAvailable",
+          "value": 14
+        },
+        {
+          "name": "AllFeedsStale",
+          "value": 15
+        },
+        {
+          "name": "FallbackNotConfigured",
+          "value": 16
+        },
+        {
+          "name": "RateChangeExceeded",
+          "doc": "Price update rejected: change vs. the previous price exceeds the\nconfigured max-rate-of-change circuit breaker.",
+          "value": 17
+        }
+      ]
+    }
+  ]
+}

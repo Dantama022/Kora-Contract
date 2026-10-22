@@ -95,6 +95,84 @@ services:
       kora.colour: "green"
       kora.service: "indexer"
 
+  # ── Keeper ───────────────────────────────────────────────────────────────────
+
+  keeper-blue:
+    image: "${DOCKER_IMAGE_KEEPER:-ghcr.io/openledger-foundation/kora-keeper:latest}"
+    restart: "no"
+    container_name: kora-keeper-blue
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "${DATABASE_URL:-}"
+      STELLAR_RPC_URL: "${STELLAR_RPC_URL:-}"
+    labels:
+      kora.colour: "blue"
+      kora.service: "keeper"
+
+  keeper-green:
+    image: "${DOCKER_IMAGE_KEEPER:-ghcr.io/openledger-foundation/kora-keeper:latest}"
+    restart: "no"
+    container_name: kora-keeper-green
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "${DATABASE_URL:-}"
+      STELLAR_RPC_URL: "${STELLAR_RPC_URL:-}"
+    labels:
+      kora.colour: "green"
+      kora.service: "keeper"
+
+  # ── Risk Pipeline ────────────────────────────────────────────────────────────
+
+  risk-pipeline-blue:
+    image: "${DOCKER_IMAGE_RISK:-ghcr.io/openledger-foundation/kora-risk-pipeline:latest}"
+    restart: "no"
+    container_name: kora-risk-pipeline-blue
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "${DATABASE_URL:-}"
+    labels:
+      kora.colour: "blue"
+      kora.service: "risk-pipeline"
+
+  risk-pipeline-green:
+    image: "${DOCKER_IMAGE_RISK:-ghcr.io/openledger-foundation/kora-risk-pipeline:latest}"
+    restart: "no"
+    container_name: kora-risk-pipeline-green
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: "${DATABASE_URL:-}"
+    labels:
+      kora.colour: "green"
+      kora.service: "risk-pipeline"
+
+  # ── Health Service ───────────────────────────────────────────────────────────
+
+  health-blue:
+    image: "${DOCKER_IMAGE_HEALTH:-ghcr.io/openledger-foundation/kora-health:latest}"
+    restart: "no"
+    container_name: kora-health-blue
+    ports:
+      - "8085:8085"
+    environment:
+      NODE_ENV: production
+      PORT: "8085"
+    labels:
+      kora.colour: "blue"
+      kora.service: "health"
+
+  health-green:
+    image: "${DOCKER_IMAGE_HEALTH:-ghcr.io/openledger-foundation/kora-health:latest}"
+    restart: "no"
+    container_name: kora-health-green
+    ports:
+      - "8086:8085"
+    environment:
+      NODE_ENV: production
+      PORT: "8085"
+    labels:
+      kora.colour: "green"
+      kora.service: "health"
+
   # ── Nginx (traffic router) ───────────────────────────────────────────────────
 
   nginx:

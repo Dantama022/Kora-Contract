@@ -1,0 +1,80 @@
+name: SDK Testnet Integration Smoke Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      rpc_url:
+        description: "Custom Soroban Testnet RPC URL (optional, defaults to SDF testnet)"
+        required: false
+        default: ""
+  schedule:
+    # Optional scheduled nightly run at 03:00 UTC
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: sdk-testnet-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  testnet-smoke:
+    name: Soroban Testnet Read-Only Smoke Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: "sdk/package-lock.json"
+
+      - name: Install SDK dependencies
+        working-directory: sdk
+        run: npm ci
+
+      - name: Build SDK
+        working-directory: sdk
+        run: npm run build
+
+      - name: Prepare Testnet Environment
+        id: prep-env
+        run: |
+          set -euo pipefail
+
+          # Determine RPC URL
+          RPC_URL="${{ github.event.inputs.rpc_url }}"
+          if [ -z "$RPC_URL" ]; then
+            RPC_URL="${{ secrets.TESTNET_RPC_URL }}"
+          fi
+          if [ -z "$RPC_URL" ]; then
+            RPC_URL="https://soroban-testnet.stellar.org"
+          fi
+
+          # Redact/mask potential sensitive tokens in URL
+          echo "::add-mask::$RPC_URL"
+          echo "TESTNET_RPC_URL=$RPC_URL" >> $GITHUB_ENV
+
+          # Check for deployment manifest secret or committed manifest
+          if [ -n "${{ secrets.KORA_DEPLOYMENT_MANIFEST_JSON }}" ]; then
+            mkdir -p deployments
+            echo '${{ secrets.KORA_DEPLOYMENT_MANIFEST_JSON }}' > deployments/testnet.json
+            echo "KORA_DEPLOYMENT_MANIFEST=deployments/testnet.json" >> $GITHUB_ENV
+            echo "has_manifest=true" >> $GITHUB_OUTPUT
+          elif [ -f "deployments/testnet.json" ]; then
+            echo "KORA_DEPLOYMENT_MANIFEST=deployments/testnet.json" >> $GITHUB_ENV
+            echo "has_manifest=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_manifest=false" >> $GITHUB_OUTPUT
+            echo "::notice::No testnet deployment manifest configured. Smoke tests will report actionable skip status."
+          fi
+
+      - name: Run SDK Integration Smoke Tests
+        working-directory: sdk
+        run: npm run test:integration
+        env:
+          TESTNET_RPC_URL: ${{ env.TESTNET_RPC_URL }}
+          KORA_DEPLOYMENT_MANIFEST: ${{ env.KORA_DEPLOYMENT_MANIFEST }}

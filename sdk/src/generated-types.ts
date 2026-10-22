@@ -1,0 +1,5137 @@
+// Auto-generated from extracted contract specs (Issue #937)
+export type ContractSpecName = "invoice_nft" | "marketplace" | "price_oracle" | "risk_registry";
+
+export const INVOICE_NFT_SPEC = {
+  "name": "invoice_nft",
+  "version": "1.0.0",
+  "functions": [
+    {
+      "name": "add_allowed_currency",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "currency",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "admin_correct_metadata_hash",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "new_hash",
+          "param_type": "Bytes"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "amend_invoice",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "debtor_hash",
+          "param_type": "Bytes"
+        },
+        {
+          "name": "amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "due_date",
+          "param_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "param_type": "String"
+        },
+        {
+          "name": "risk_score",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "archive_invoice",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "commit_metadata_hash",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "metadata_hash",
+          "param_type": "Bytes"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "execute_upgrade",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "flag_metadata_mismatch",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "challenger",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "evidence_hash",
+          "param_type": "Bytes"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "freeze_invoice",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "freeze_sme_invoices",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "max_to_process",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<u32, InvoiceNftError>"
+    },
+    {
+      "name": "get_amount_bounds",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "tier",
+          "param_type": "RiskTier"
+        }
+      ],
+      "return_type": "Option<AmountBounds>"
+    },
+    {
+      "name": "get_debtor_attestation",
+      "doc": "Read-only getter used by marketplace attestation checks and indexers.",
+      "is_readonly": true,
+      "parameters": [],
+      "return_type": "Option<Address>"
+    },
+    {
+      "name": "get_first_mint",
+      "doc": "Returns the invoice ID of an SME's first mint, or None if none minted.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Option<u64>"
+    },
+    {
+      "name": "get_invoice",
+      "doc": "Retrieve a full invoice by merging hot + cold keys.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<Invoice, InvoiceNftError>"
+    },
+    {
+      "name": "get_metadata_cid_history",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Vec<String>"
+    },
+    {
+      "name": "get_mint_rate_limit",
+      "doc": "Return the configured per-SME mint rate limit, or `None` when unthrottled.",
+      "is_readonly": true,
+      "parameters": [],
+      "return_type": "Option<MintRateLimit>"
+    },
+    {
+      "name": "get_outstanding_exposure",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "i128"
+    },
+    {
+      "name": "get_protocol_config",
+      "is_readonly": true,
+      "parameters": [],
+      "return_type": "ProtocolConfig"
+    },
+    {
+      "name": "get_sme_invoice_ids",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "start",
+          "param_type": "u32"
+        },
+        {
+          "name": "limit",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Vec<u64>"
+    },
+    {
+      "name": "get_sme_mint_window",
+      "doc": "Return `(window_start_ts, mints_used)` for an SME's current mint window.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "(u64, u32)"
+    },
+    {
+      "name": "get_sme_referrer",
+      "doc": "Returns the first-mint referrer for an SME, or None if not set.",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Option<Address>"
+    },
+    {
+      "name": "initialize",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "access_control",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "invoice_count",
+      "is_readonly": false,
+      "parameters": [],
+      "return_type": "u64"
+    },
+    {
+      "name": "is_currency_allowed",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "currency",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "bool"
+    },
+    {
+      "name": "is_invoice_frozen",
+      "is_readonly": true,
+      "parameters": [
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "bool"
+    },
+    {
+      "name": "migrate",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "migrate_versions",
+      "doc": "Explicit adjacent-step migration; `migrate` remains as a compatibility wrapper.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "from_version",
+          "param_type": "u32"
+        },
+        {
+          "name": "to_version",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "mint_invoice",
+      "doc": "Mint a new invoice NFT. Caller must be a verified SME.\n\n**Parameters:**\n- `sme` — The SME address minting the invoice (must sign).\n- `debtor_hash` — SHA-256 hash of debtor PII (max `MAX_DEBTOR_HASH_LEN` bytes). PII stays off-chain.\n- `amount` — Face value in stroops (7 decimals). Must be > 0.\n- `currency` — Token symbol (e.g. `USDC`, `EURC`).\n- `due_date` — Unix timestamp; must be strictly in the future.\n- `ipfs_cid` — CIDv0 or CIDv1 of the full invoice document on IPFS (max 128 bytes).\n- `risk_score` — Credit score 0–100 assigned by the verifier. Maps to a `RiskTier`.\n- `notes` — Optional free-text memo (schema v2; `None` is fine).\n\n**Returns:** The allocated invoice ID (monotonically increasing from 1).\n\n**Errors:**\n- `KoraError::ProtocolPaused` — Protocol is paused.\n- `KoraError::InvalidAmount` — `amount` is zero, negative, or exceeds `credit_limit`.\n- `KoraError::InvalidDueDate` — `due_date` is not in the future.\n- `KoraError::InvalidRiskScore` — `risk_score` > 100.\n- `KoraError:",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "debtor_hash",
+          "param_type": "Bytes"
+        },
+        {
+          "name": "amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "currency",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "due_date",
+          "param_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "param_type": "String"
+        },
+        {
+          "name": "risk_score",
+          "param_type": "u32"
+        },
+        {
+          "name": "notes",
+          "param_type": "Option<String>"
+        }
+      ],
+      "return_type": "Result<u64, InvoiceNftError>"
+    },
+    {
+      "name": "mint_invoice_with_referrer",
+      "doc": "Mint a new invoice NFT with an optional referral attribution.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "debtor_hash",
+          "param_type": "Bytes"
+        },
+        {
+          "name": "amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "currency",
+          "param_type": "Symbol"
+        },
+        {
+          "name": "due_date",
+          "param_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "param_type": "String"
+        },
+        {
+          "name": "risk_score",
+          "param_type": "u32"
+        },
+        {
+          "name": "notes",
+          "param_type": "Option<String>"
+        },
+        {
+          "name": "referrer",
+          "param_type": "Option<Address>"
+        }
+      ],
+      "return_type": "Result<u64, InvoiceNftError>"
+    },
+    {
+      "name": "mint_invoices_batch",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoices",
+          "param_type": "Vec<BatchInvoiceInput>"
+        }
+      ],
+      "return_type": "Result<Vec<u64>, InvoiceNftError>"
+    },
+    {
+      "name": "next_id",
+      "is_readonly": false,
+      "parameters": [],
+      "return_type": "u64"
+    },
+    {
+      "name": "propose_upgrade",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "new_wasm_hash",
+          "param_type": "BytesN<32>"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "reconcile_outstanding_exposure",
+      "doc": "Recompute SME exposure from ground truth (scans all invoice hot keys).",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "i128"
+    },
+    {
+      "name": "refresh_risk_score",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "remove_allowed_currency",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "currency",
+          "param_type": "Symbol"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "resolve_metadata_dispute",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "upheld",
+          "param_type": "bool"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_amount_bounds",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "tier",
+          "param_type": "RiskTier"
+        },
+        {
+          "name": "min_amount",
+          "param_type": "i128"
+        },
+        {
+          "name": "max_amount",
+          "param_type": "i128"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_authorized_callers",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "marketplace",
+          "param_type": "Address"
+        },
+        {
+          "name": "financing_pool",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_created",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_debtor_attestation",
+      "doc": "Configure the debtor attestation contract address. Admin only.\n\nMirrors other external contract pointers (`set_risk_registry`).\nRejects the contract's own address as a zero-address sentinel guard\nvia `require_not_self`; fails with `NotInitialized` when\n`access_control` is unset and `NotAdmin` for non-admin callers.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "attestation",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_defaulted",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_funded",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_listed",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_mint_rate_limit",
+      "doc": "Configure the per-SME mint rate limit. Admin only.\n\nSetting `max_mints` or `window_secs` to zero is rejected; unthrottled\nminting is achieved by leaving the key unset, preserving existing\nbehavior until an admin opts in.\n\n**Errors:**\n- `InvoiceNftError::NotAdmin` — Caller is not the admin.\n- `InvoiceNftError::InvalidParameterValue` — `max_mints` or `window_secs` is zero.",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "max_mints",
+          "param_type": "u32"
+        },
+        {
+          "name": "window_secs",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_protocol_config",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "config",
+          "param_type": "ProtocolConfig"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_repaid",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "caller",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "set_risk_registry",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "risk_registry",
+          "param_type": "Address"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "unfreeze_invoice",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "unfreeze_sme_invoices",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "admin",
+          "param_type": "Address"
+        },
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "max_to_process",
+          "param_type": "u32"
+        }
+      ],
+      "return_type": "Result<u32, InvoiceNftError>"
+    },
+    {
+      "name": "update_metadata_cid",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        },
+        {
+          "name": "new_cid",
+          "param_type": "String"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    },
+    {
+      "name": "withdraw_invoice",
+      "is_readonly": false,
+      "parameters": [
+        {
+          "name": "sme",
+          "param_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "param_type": "u64"
+        }
+      ],
+      "return_type": "Result<(), InvoiceNftError>"
+    }
+  ],
+  "types": [
+    {
+      "name": "AdminAction",
+      "kind": "union",
+      "doc": "Action types that can be proposed for multisig execution",
+      "fields": [
+        {
+          "name": "Pause",
+          "field_type": "void"
+        },
+        {
+          "name": "Unpause",
+          "field_type": "void"
+        },
+        {
+          "name": "GrantRole",
+          "field_type": "(Address, u32)"
+        },
+        {
+          "name": "RevokeRole",
+          "field_type": "Address"
+        },
+        {
+          "name": "TransferAdmin",
+          "field_type": "Address"
+        },
+        {
+          "name": "RotateAdmin",
+          "field_type": "Address",
+          "doc": "Rotate the admin key to a new address.\nIdentical effect to `TransferAdmin` but signals deliberate key-rotation\nsemantics (e.g. after a suspected compromise) rather than an ordinary\nownership handoff. Emits a dedicated `admin_rotated` event for\noff-chain monitoring to alert on."
+        },
+        {
+          "name": "ResolveDispute",
+          "field_type": "(Address, u64, bool)",
+          "doc": "Resolve a dispute through governance (Issue #671).\nRequires multisig quorum approval and governance timelock.\nParameters: (dispute_resolver, invoice_id, upheld)"
+        }
+      ]
+    },
+    {
+      "name": "AllocationDrift",
+      "kind": "struct",
+      "doc": "Result of an allocation drift check (Issue #673).\nIdentifies assets where actual holdings deviate from policy targets.",
+      "fields": [
+        {
+          "name": "asset",
+          "field_type": "Address"
+        },
+        {
+          "name": "current_allocation_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "drifted_below",
+          "field_type": "bool",
+          "doc": "true if current_allocation < target_min, false if > target_max"
+        },
+        {
+          "name": "target_max_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "target_min_bps",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "AmountBounds",
+      "kind": "struct",
+      "doc": "Per-risk-tier face-value bounds for invoice minting/listing.",
+      "fields": [
+        {
+          "name": "max",
+          "field_type": "i128"
+        },
+        {
+          "name": "min",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "AssetAllocationPolicy",
+      "kind": "struct",
+      "doc": "Asset allocation policy for treasury diversification (Issue #673).\nDefines target allocation ranges for each asset type to prevent unintended\nconcentration of treasury holdings. Used by check_allocation_drift to identify\nwhen actual holdings deviate from policy parameters.",
+      "fields": [
+        {
+          "name": "asset",
+          "field_type": "Address"
+        },
+        {
+          "name": "max_allocation_bps",
+          "field_type": "u32",
+          "doc": "Maximum target allocation as a percentage (0–100, in basis points where 10000 = 100%)"
+        },
+        {
+          "name": "min_allocation_bps",
+          "field_type": "u32",
+          "doc": "Minimum target allocation as a percentage (0–100, in basis points where 10000 = 100%)"
+        },
+        {
+          "name": "updated_at",
+          "field_type": "u64",
+          "doc": "Timestamp when this policy was last updated"
+        }
+      ]
+    },
+    {
+      "name": "AuditEntry",
+      "kind": "struct",
+      "doc": "A single audit log entry.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "String"
+        },
+        {
+          "name": "actor",
+          "field_type": "Address"
+        },
+        {
+          "name": "sequence",
+          "field_type": "u64"
+        },
+        {
+          "name": "timestamp",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "AuditSource",
+      "kind": "union",
+      "doc": "Identifies which contract originated the admin action.",
+      "fields": [
+        {
+          "name": "AccessControl",
+          "field_type": "void"
+        },
+        {
+          "name": "Treasury",
+          "field_type": "void"
+        },
+        {
+          "name": "RiskRegistry",
+          "field_type": "void"
+        },
+        {
+          "name": "InvoiceNft",
+          "field_type": "void"
+        },
+        {
+          "name": "ParameterRegistry",
+          "field_type": "void"
+        },
+        {
+          "name": "ContributorBadges",
+          "field_type": "void"
+        },
+        {
+          "name": "Marketplace",
+          "field_type": "void"
+        },
+        {
+          "name": "FinancingPool",
+          "field_type": "void"
+        }
+      ]
+    },
+    {
+      "name": "BadgeCategory",
+      "kind": "union",
+      "doc": "Category of a contributor badge.  Determines the minting-authority check\nand may be used by future governance-weight integrations.",
+      "fields": [
+        {
+          "name": "Code",
+          "field_type": "void",
+          "doc": "Merged Wave issue or significant code contribution."
+        },
+        {
+          "name": "Security",
+          "field_type": "void",
+          "doc": "Verified security finding (bug bounty / audit)."
+        },
+        {
+          "name": "Community",
+          "field_type": "void",
+          "doc": "Community service: verifier participation, governance, documentation."
+        }
+      ]
+    },
+    {
+      "name": "BatchInvoiceInput",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "Bid",
+      "kind": "struct",
+      "doc": "A reverse-auction bid submitted by an investor (#440).\n\nStored under `DataKey::Bid(invoice_id, investor)`.\nThe investor commits to funding `amount` tokens at `bid_price` total.\n`bid_price` must be <= current asking price and >= the floor price (if a\ndecay schedule is active).",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128",
+          "doc": "The token amount the investor proposes to contribute."
+        },
+        {
+          "name": "bid_price",
+          "field_type": "i128",
+          "doc": "The total price the investor is willing to pay for their `amount` share.\nMust satisfy `bid_price <= current_asking_price`."
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitted_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the bid was submitted."
+        }
+      ]
+    },
+    {
+      "name": "CommonError",
+      "kind": "error_enum",
+      "doc": "Common validation/arithmetic errors shared by every contract's\n`kora_shared::validation` and `kora_shared::reentrancy` helpers.\n\nKept deliberately small: Soroban's `#[contracterror]` macro caps an error\nenum at 50 variants (`SCSpecUDTErrorEnumV0.cases<50>` in the XDR spec).\nDomain-specific errors belong on each contract's own local error enum,\nwhich implements `From<CommonError>` so `?` still works through the\nshared validation helpers.",
+      "fields": [
+        {
+          "name": "InvalidAmount",
+          "field_type": "1"
+        },
+        {
+          "name": "InvalidDueDate",
+          "field_type": "2"
+        },
+        {
+          "name": "InvalidRiskScore",
+          "field_type": "3"
+        },
+        {
+          "name": "InvalidCid",
+          "field_type": "4"
+        },
+        {
+          "name": "InvalidFeeRate",
+          "field_type": "5"
+        },
+        {
+          "name": "InvalidAddress",
+          "field_type": "6"
+        },
+        {
+          "name": "EmptyString",
+          "field_type": "7"
+        },
+        {
+          "name": "EmptyBytes",
+          "field_type": "8"
+        },
+        {
+          "name": "FieldTooLong",
+          "field_type": "9"
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "field_type": "10"
+        },
+        {
+          "name": "ArithmeticUnderflow",
+          "field_type": "11",
+          "doc": "Returned by `safe_sub` when the result would underflow (a < b)."
+        },
+        {
+          "name": "Reentrancy",
+          "field_type": "12",
+          "doc": "Reentrancy guard triggered."
+        },
+        {
+          "name": "InvalidLength",
+          "field_type": "13"
+        },
+        {
+          "name": "BatchSizeExceeded",
+          "field_type": "14"
+        }
+      ]
+    },
+    {
+      "name": "CommunityProposal",
+      "kind": "struct",
+      "doc": "A community proposal staged for signer review (Issue #672).\nNon-signers can submit proposals; signers then review and formally sponsor them\nfor inclusion in the multisig governance workflow.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "description",
+          "field_type": "String"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitted_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitter",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "ContributorBadge",
+      "kind": "struct",
+      "doc": "On-chain record for a single contributor badge (non-transferable).\n\nThe badge is \"soulbound\" — the `owner` field is set at mint and the\ncontract's `transfer` entry-point is intentionally absent.  The only\nstate transitions allowed are `Active → Revoked` (admin revocation for\nfraudulent/erroneous badges).",
+      "fields": [
+        {
+          "name": "category",
+          "field_type": "BadgeCategory",
+          "doc": "Badge category (Code / Security / Community)."
+        },
+        {
+          "name": "description",
+          "field_type": "String",
+          "doc": "Short human-readable description of the contribution (max 128 chars)."
+        },
+        {
+          "name": "evidence_cid",
+          "field_type": "String",
+          "doc": "IPFS CID of supporting evidence or linked PR/report."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing badge ID."
+        },
+        {
+          "name": "minted_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the badge was minted."
+        },
+        {
+          "name": "owner",
+          "field_type": "Address",
+          "doc": "Address this badge is permanently bound to."
+        },
+        {
+          "name": "revocation_reason",
+          "field_type": "Option<String>",
+          "doc": "Optional free-text reason for revocation."
+        },
+        {
+          "name": "revoked",
+          "field_type": "bool",
+          "doc": "Whether this badge has been revoked."
+        },
+        {
+          "name": "revoked_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when revoked (0 if not revoked)."
+        }
+      ]
+    },
+    {
+      "name": "DataKey",
+      "kind": "union",
+      "fields": [
+        {
+          "name": "NextId",
+          "field_type": "void",
+          "doc": "Next invoice ID to assign."
+        },
+        {
+          "name": "Admin",
+          "field_type": "void",
+          "doc": "Admin address."
+        },
+        {
+          "name": "PendingAdmin",
+          "field_type": "void",
+          "doc": "Pending new admin (two-step transfer)."
+        },
+        {
+          "name": "AccessControl",
+          "field_type": "void",
+          "doc": "Access control contract address."
+        },
+        {
+          "name": "MigrationVersion",
+          "field_type": "void",
+          "doc": "Current schema migration version."
+        },
+        {
+          "name": "UpgradeProposal",
+          "field_type": "void",
+          "doc": "Pending WASM upgrade proposal: (wasm_hash, proposed_at)."
+        },
+        {
+          "name": "Marketplace",
+          "field_type": "void",
+          "doc": "Authorized marketplace contract address."
+        },
+        {
+          "name": "FinancingPool",
+          "field_type": "void",
+          "doc": "Authorized financing pool contract address."
+        },
+        {
+          "name": "RiskRegistry",
+          "field_type": "void",
+          "doc": "Authorized risk registry contract address."
+        },
+        {
+          "name": "DebtorAttestation",
+          "field_type": "void",
+          "doc": "Debtor attestation contract address (discoverable per deployment)."
+        },
+        {
+          "name": "ProtocolConfig",
+          "field_type": "void",
+          "doc": "Protocol-wide configuration."
+        },
+        {
+          "name": "AuditLogHead",
+          "field_type": "void",
+          "doc": "Next write position in the admin audit ring buffer."
+        },
+        {
+          "name": "AuditLogTotal",
+          "field_type": "void",
+          "doc": "Total admin actions ever recorded (monotonic)."
+        },
+        {
+          "name": "NextBatchId",
+          "field_type": "void",
+          "doc": "Monotonic counter for batch-mint correlation IDs."
+        },
+        {
+          "name": "MintRateLimit",
+          "field_type": "void",
+          "doc": "Per-SME mint velocity cap config."
+        },
+        {
+          "name": "AmountBounds",
+          "field_type": "RiskTier",
+          "doc": "Per-risk-tier face-value bounds."
+        },
+        {
+          "name": "InvoiceHot",
+          "field_type": "u64",
+          "doc": "HOT: status + financial fields for an invoice. Read on every transition."
+        },
+        {
+          "name": "InvoiceCold",
+          "field_type": "u64",
+          "doc": "COLD: metadata fields for an invoice. Read only for get_invoice / metadata ops."
+        },
+        {
+          "name": "OutstandingExposure",
+          "field_type": "Address",
+          "doc": "Aggregate outstanding exposure for an SME."
+        },
+        {
+          "name": "CurrencyAllowlist",
+          "field_type": "Symbol",
+          "doc": "Currency symbol allowlist entry."
+        },
+        {
+          "name": "InvoiceFrozen",
+          "field_type": "u64",
+          "doc": "Per-invoice freeze flag."
+        },
+        {
+          "name": "MetadataDispute",
+          "field_type": "u64",
+          "doc": "Open or resolved metadata-hash dispute for an invoice."
+        },
+        {
+          "name": "AuditEntry",
+          "field_type": "u64",
+          "doc": "Ring-buffer audit log entry at position n."
+        },
+        {
+          "name": "SmeInvoiceIds",
+          "field_type": "Address",
+          "doc": "Vec<u64> of invoice IDs minted by an SME, in mint order."
+        },
+        {
+          "name": "SmeMintWindow",
+          "field_type": "Address",
+          "doc": "Rolling mint window state for an SME: (window_start_ts, mints_used)."
+        },
+        {
+          "name": "MetadataCidHistory",
+          "field_type": "u64",
+          "doc": "Bounded history of prior IPFS CIDs for an invoice."
+        },
+        {
+          "name": "FirstMint",
+          "field_type": "Address",
+          "doc": "Invoice ID of the first invoice ever minted by an SME (set once, never updated)."
+        },
+        {
+          "name": "SmeReferrer",
+          "field_type": "Address",
+          "doc": "Referrer attributed to an SME on their first mint."
+        },
+        {
+          "name": "Invoice",
+          "field_type": "u64",
+          "doc": "v1/v2 full Invoice struct — read during migrate() v2→v3, then removed."
+        }
+      ]
+    },
+    {
+      "name": "DecaySchedule",
+      "kind": "struct",
+      "doc": "Dutch-auction / linear-decay price schedule for a listing (#439).\n\nWhen attached to a listing via `DataKey::DecaySchedule(invoice_id)`, the\neffective asking price decays linearly from `start_price` to `floor_price`\nover the window `[decay_start_ts, decay_end_ts]`.\n\n- Before `decay_start_ts`  : price == `start_price` (original asking price)\n- After  `decay_end_ts`    : price == `floor_price`  (floor)\n- In between               : linear interpolation\n\n`floor_price` must be > 0 and < `start_price`.\n`decay_end_ts` must be <= `funding_deadline` of the listing.",
+      "fields": [
+        {
+          "name": "decay_end_ts",
+          "field_type": "u64",
+          "doc": "Timestamp at which the price reaches `floor_price` (and stays there)."
+        },
+        {
+          "name": "decay_start_ts",
+          "field_type": "u64",
+          "doc": "Timestamp at which price decay begins."
+        },
+        {
+          "name": "floor_price",
+          "field_type": "i128",
+          "doc": "The minimum (floor) price the listing will reach."
+        },
+        {
+          "name": "start_price",
+          "field_type": "i128",
+          "doc": "The initial (ceiling) price — mirrors `Listing::asking_price`."
+        }
+      ]
+    },
+    {
+      "name": "DiscretionaryWithdrawal",
+      "kind": "struct",
+      "doc": "A timelocked, multi-approver discretionary treasury withdrawal proposal.\n\nThis is the *strictly separate* path from the fee-sweep and grant-disbursement\nflows — any ad-hoc discretionary withdrawal must go through this proposal\nlifecycle rather than the direct `withdraw` admin path.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128",
+          "doc": "Amount to withdraw."
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>",
+          "doc": "Addresses that have approved (quorum tracked against access_control multisig config)."
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been cancelled."
+        },
+        {
+          "name": "executable_after",
+          "field_type": "u64",
+          "doc": "Ledger timestamp before which the proposal cannot be executed (timelock)."
+        },
+        {
+          "name": "executed",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been executed."
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp after which the proposal expires."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing proposal ID."
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when proposed."
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "Proposer address."
+        },
+        {
+          "name": "purpose",
+          "field_type": "String",
+          "doc": "Free-text purpose description (max 256 chars) for on-chain transparency."
+        },
+        {
+          "name": "recipient",
+          "field_type": "Address",
+          "doc": "Destination address (must be on the recipient allowlist)."
+        },
+        {
+          "name": "token",
+          "field_type": "Address",
+          "doc": "Token to withdraw."
+        }
+      ]
+    },
+    {
+      "name": "Dispute",
+      "kind": "struct",
+      "doc": "Dispute state for an invoice under governance review. (#565)",
+      "fields": [
+        {
+          "name": "challenger",
+          "field_type": "Address"
+        },
+        {
+          "name": "evidence_cid",
+          "field_type": "Option<String>"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "opened_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "resolved",
+          "field_type": "bool"
+        },
+        {
+          "name": "resolved_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "upheld",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "EarlySettlementOffer",
+      "kind": "struct",
+      "doc": "An SME's early-termination buyout offer for a funded invoice.\n\nThe SME escrows `amount` (a discount to `total_owed`) into the pool; investors then\naccept, and once investors representing 100% of pool shares have accepted, the escrow\nis distributed pro-rata and the pool closes.",
+      "fields": [
+        {
+          "name": "accepted",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "accepted_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "GuardKey",
+      "kind": "union",
+      "doc": "Storage key for the reentrancy lock.",
+      "fields": [
+        {
+          "name": "Lock",
+          "field_type": "void"
+        }
+      ]
+    },
+    {
+      "name": "Installment",
+      "kind": "struct",
+      "doc": "A single scheduled repayment installment.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "paid",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "InstallmentSchedule",
+      "kind": "struct",
+      "doc": "An installment repayment schedule attached to a financing pool.",
+      "fields": [
+        {
+          "name": "installments",
+          "field_type": "Vec<Installment>"
+        },
+        {
+          "name": "next_index",
+          "field_type": "u32",
+          "doc": "Index of the next unpaid installment."
+        }
+      ]
+    },
+    {
+      "name": "Invoice",
+      "kind": "struct",
+      "doc": "Core invoice NFT data stored on-chain\n\nSchema version: 2 (see docs/MIGRATIONS.md for upgrade history)\n\nVersion history:\nv1 — original fields through `repaid_at`\nv2 — added `notes: Option<String>` for optional free-text memo (migration in invoice_nft::migrate)",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "metadata_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>",
+          "doc": "Optional free-text memo attached at minting time. Added in schema v2.\nPre-existing records will have this field set to None by invoice_nft::migrate."
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceCold",
+      "kind": "struct",
+      "doc": "Rarely-accessed metadata fields stored under `InvoiceCold(id)`.",
+      "fields": [
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "metadata_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceHot",
+      "kind": "struct",
+      "doc": "Frequently-accessed invoice fields stored under `InvoiceHot(id)`.\nStatus transitions read and write only this key.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceNftError",
+      "kind": "error_enum",
+      "fields": [
+        {
+          "name": "AlreadyInitialized",
+          "field_type": "1"
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "field_type": "2"
+        },
+        {
+          "name": "BatchSizeExceeded",
+          "field_type": "3"
+        },
+        {
+          "name": "CreditLimitExceeded",
+          "field_type": "4"
+        },
+        {
+          "name": "CurrencyNotAllowed",
+          "field_type": "5"
+        },
+        {
+          "name": "EmptyBytes",
+          "field_type": "6"
+        },
+        {
+          "name": "EmptyString",
+          "field_type": "7"
+        },
+        {
+          "name": "FieldTooLong",
+          "field_type": "8"
+        },
+        {
+          "name": "InvalidAddress",
+          "field_type": "9"
+        },
+        {
+          "name": "InvalidAmount",
+          "field_type": "10"
+        },
+        {
+          "name": "InvalidDueDate",
+          "field_type": "11"
+        },
+        {
+          "name": "InvalidInvoiceStatus",
+          "field_type": "12"
+        },
+        {
+          "name": "InvalidRiskScore",
+          "field_type": "13"
+        },
+        {
+          "name": "InvoiceNotFound",
+          "field_type": "14"
+        },
+        {
+          "name": "NoUpgradeProposed",
+          "field_type": "15"
+        },
+        {
+          "name": "NotAdmin",
+          "field_type": "16"
+        },
+        {
+          "name": "NotInitialized",
+          "field_type": "17"
+        },
+        {
+          "name": "NotInvoiceOwner",
+          "field_type": "18"
+        },
+        {
+          "name": "ProtocolPaused",
+          "field_type": "19"
+        },
+        {
+          "name": "Reentrancy",
+          "field_type": "20"
+        },
+        {
+          "name": "SMENotRegistered",
+          "field_type": "21"
+        },
+        {
+          "name": "Unauthorized",
+          "field_type": "22"
+        },
+        {
+          "name": "UpgradeTimelockNotElapsed",
+          "field_type": "23"
+        },
+        {
+          "name": "MintRateLimitExceeded",
+          "field_type": "24"
+        },
+        {
+          "name": "InvalidParameterValue",
+          "field_type": "25"
+        },
+        {
+          "name": "InvalidMigrationTarget",
+          "field_type": "26"
+        },
+        {
+          "name": "InvalidReferrer",
+          "field_type": "27"
+        },
+        {
+          "name": "ReferralAlreadyLocked",
+          "field_type": "28"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceStatus",
+      "kind": "union",
+      "doc": "Invoice lifecycle status",
+      "fields": [
+        {
+          "name": "Created",
+          "field_type": "void"
+        },
+        {
+          "name": "Listed",
+          "field_type": "void"
+        },
+        {
+          "name": "Funded",
+          "field_type": "void"
+        },
+        {
+          "name": "Repaid",
+          "field_type": "void"
+        },
+        {
+          "name": "Defaulted",
+          "field_type": "void"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceV1",
+      "kind": "struct",
+      "doc": "Schema v1 Invoice (no `notes` field). Used by migrate() v1→v2 step.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "KeyRotationProposal",
+      "kind": "struct",
+      "doc": "Proposed key rotation pending timelock",
+      "fields": [
+        {
+          "name": "new_key",
+          "field_type": "Address",
+          "doc": "New key being rotated in"
+        },
+        {
+          "name": "old_key",
+          "field_type": "Address",
+          "doc": "Old key being rotated out"
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Timestamp when rotation was proposed"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "Who proposed the rotation (for audit trail)"
+        },
+        {
+          "name": "rotation_type",
+          "field_type": "KeyRotationType",
+          "doc": "Type of rotation"
+        }
+      ]
+    },
+    {
+      "name": "KeyRotationType",
+      "kind": "union",
+      "doc": "Type of key being rotated",
+      "fields": [
+        {
+          "name": "MultisigSigner",
+          "field_type": "void",
+          "doc": "Multi-sig co-signer rotation"
+        },
+        {
+          "name": "Verifier",
+          "field_type": "void",
+          "doc": "Verifier key rotation"
+        },
+        {
+          "name": "Admin",
+          "field_type": "void",
+          "doc": "Admin key rotation"
+        }
+      ]
+    },
+    {
+      "name": "Listing",
+      "kind": "struct",
+      "doc": "A marketplace listing for an invoice",
+      "fields": [
+        {
+          "name": "asking_price",
+          "field_type": "i128"
+        },
+        {
+          "name": "bidding_deadline",
+          "field_type": "Option<u64>",
+          "doc": "Optional deadline for the reverse-auction bidding window (#440).\nWhen `Some`, direct `fund_invoice` calls are rejected until\n`accept_bids` converts winning bids into positions.\nWhen `None`, the listing uses the standard first-come-first-served flow."
+        },
+        {
+          "name": "face_value",
+          "field_type": "i128"
+        },
+        {
+          "name": "funded_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "funding_deadline",
+          "field_type": "u64"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "is_active",
+          "field_type": "bool"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "MetadataDispute",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "challenger",
+          "field_type": "Address"
+        },
+        {
+          "name": "evidence_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "raised_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "resolved",
+          "field_type": "bool"
+        },
+        {
+          "name": "upheld",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "MintRateLimit",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "max_mints",
+          "field_type": "u32"
+        },
+        {
+          "name": "window_secs",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "MultisigConfig",
+      "kind": "struct",
+      "doc": "Multisig configuration",
+      "fields": [
+        {
+          "name": "signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "threshold",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ParameterKey",
+      "kind": "union",
+      "doc": "A tunable protocol parameter governed by the parameter-change process.",
+      "fields": [
+        {
+          "name": "FeeBps",
+          "field_type": "void"
+        },
+        {
+          "name": "LatePenaltyBps",
+          "field_type": "void"
+        },
+        {
+          "name": "MaxRiskScore",
+          "field_type": "void"
+        },
+        {
+          "name": "TimelockDelay",
+          "field_type": "void"
+        }
+      ]
+    },
+    {
+      "name": "ParameterProposal",
+      "kind": "struct",
+      "doc": "A governance proposal to change a single protocol parameter.\n\nReuses the B2 multisig signer set for gating and a B1-style timelock before execution.",
+      "fields": [
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "key",
+          "field_type": "ParameterKey"
+        },
+        {
+          "name": "new_value",
+          "field_type": "u32"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "PendingAction",
+      "kind": "struct",
+      "doc": "A privileged action awaiting a quorum of co-signer approvals.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "action_hash",
+          "field_type": "BytesN<32>"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Pool",
+      "kind": "struct",
+      "doc": "Pool state for a funded invoice",
+      "fields": [
+        {
+          "name": "face_value",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "is_closed",
+          "field_type": "bool"
+        },
+        {
+          "name": "late_penalty_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "penalty_applied",
+          "field_type": "bool"
+        },
+        {
+          "name": "repaid_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        },
+        {
+          "name": "total_funded",
+          "field_type": "i128"
+        },
+        {
+          "name": "total_owed",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "Position",
+      "kind": "struct",
+      "doc": "A single investor position in a pool",
+      "fields": [
+        {
+          "name": "contributed",
+          "field_type": "i128"
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "share_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "yield_claimed",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "PositionSaleOffer",
+      "kind": "struct",
+      "doc": "An active offer to sell an investor position on the secondary market",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "PositionShare",
+      "kind": "struct",
+      "doc": "A fractional claim on a Position, enabling secondary-market transfers\nbefore the underlying invoice is repaid or defaulted. (#563)",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "original_investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "owner",
+          "field_type": "Address"
+        },
+        {
+          "name": "share_index",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "Proposal",
+      "kind": "struct",
+      "doc": "A multisig proposal awaiting approval",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "ProtocolConfig",
+      "kind": "struct",
+      "doc": "Protocol-level configuration.\n\nNote: pause state is NOT stored here — it is owned exclusively by the\nAccessControl contract to avoid split-brain between two sources of truth.",
+      "fields": [
+        {
+          "name": "fee_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "late_penalty_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "max_risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "min_funding_period",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "ProtocolStats",
+      "kind": "struct",
+      "doc": "Protocol-wide aggregate statistics tracked by the financing pool.",
+      "fields": [
+        {
+          "name": "active_pools",
+          "field_type": "u32"
+        },
+        {
+          "name": "pools_defaulted",
+          "field_type": "u32"
+        },
+        {
+          "name": "pools_opened",
+          "field_type": "u32"
+        },
+        {
+          "name": "total_repaid",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "QueuePointers",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "head",
+          "field_type": "u64"
+        },
+        {
+          "name": "next_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "tail",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "QueueStorageKey",
+      "kind": "union",
+      "fields": [
+        {
+          "name": "Pointers",
+          "field_type": "void"
+        },
+        {
+          "name": "Request",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "RecoveryProposal",
+      "kind": "struct",
+      "doc": "A multisig signer recovery proposal for lost-key scenarios.\nAllows reconfiguring the signer set after a long timelock if quorum becomes unreachable.",
+      "fields": [
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "new_signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "new_threshold",
+          "field_type": "u32"
+        },
+        {
+          "name": "objections",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "RegistryParam",
+      "kind": "struct",
+      "doc": "A single governed parameter value.\n\nParameters are stored as `i128` to accommodate both `u32` fee rates\n(which fit comfortably) and `i128` token amounts like `minimum_stake`.\nConsuming contracts are responsible for casting back to the expected type\nafter reading; the registry enforces only the supplied min/max bounds.",
+      "fields": [
+        {
+          "name": "max_value",
+          "field_type": "i128",
+          "doc": "Upper bound (inclusive) for governance proposals (0 = no upper bound)."
+        },
+        {
+          "name": "min_value",
+          "field_type": "i128",
+          "doc": "Lower bound (inclusive) for governance proposals (0 = no lower bound)."
+        },
+        {
+          "name": "updated_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when this value was last updated."
+        },
+        {
+          "name": "updated_by",
+          "field_type": "Address",
+          "doc": "Address that last updated this value (governance contract or admin)."
+        },
+        {
+          "name": "value",
+          "field_type": "i128",
+          "doc": "The current governed value."
+        }
+      ]
+    },
+    {
+      "name": "RegistryParamKey",
+      "kind": "union",
+      "doc": "Keys identifying every governable protocol parameter stored in\n`parameter_registry`.  The same enum is used by consuming contracts to\nindex their local cache, so callers never pass raw strings.\n\nAdding a new parameter: append a new variant here and handle it in\n`parameter_registry`'s `set_parameter` dispatch.",
+      "fields": [
+        {
+          "name": "MarketplaceFeeBps",
+          "field_type": "void",
+          "doc": "Base protocol fee in basis points (0–10 000)."
+        },
+        {
+          "name": "ReferrerSplitBps",
+          "field_type": "void",
+          "doc": "Fraction of the protocol fee routed to the referrer (0–10 000 bps)."
+        },
+        {
+          "name": "MinContributionAmount",
+          "field_type": "void",
+          "doc": "Minimum contribution floor per fund_invoice call (in token's smallest unit)."
+        },
+        {
+          "name": "TierFeeAaa",
+          "field_type": "void",
+          "doc": "Per-risk-tier fee override — AAA tier (bps)."
+        },
+        {
+          "name": "TierFeeAa",
+          "field_type": "void",
+          "doc": "Per-risk-tier fee override — AA tier (bps)."
+        },
+        {
+          "name": "TierFeeA",
+          "field_type": "void",
+          "doc": "Per-risk-tier fee override — A tier (bps)."
+        },
+        {
+          "name": "TierFeeB",
+          "field_type": "void",
+          "doc": "Per-risk-tier fee override — B tier (bps)."
+        },
+        {
+          "name": "TierFeeC",
+          "field_type": "void",
+          "doc": "Per-risk-tier fee override — C tier (bps)."
+        },
+        {
+          "name": "LatePenaltyBps",
+          "field_type": "void",
+          "doc": "Late-repayment penalty rate (bps)."
+        },
+        {
+          "name": "LatePenaltyTreasurySplitBps",
+          "field_type": "void",
+          "doc": "Fraction of late penalty routed to treasury vs investors (bps)."
+        },
+        {
+          "name": "MaxPositionBps",
+          "field_type": "void",
+          "doc": "Maximum per-investor concentration per pool (bps, 1–10 000)."
+        },
+        {
+          "name": "GracePeriodSecs",
+          "field_type": "void",
+          "doc": "Grace period before a late invoice can be defaulted (seconds)."
+        },
+        {
+          "name": "MinimumVerifierStake",
+          "field_type": "void",
+          "doc": "Minimum stake amount for a verifier (in staking token's smallest unit)."
+        },
+        {
+          "name": "SlashPercentageBps",
+          "field_type": "void",
+          "doc": "Fraction of stake to slash per SME default (bps)."
+        },
+        {
+          "name": "MinimumDebtorScore",
+          "field_type": "void",
+          "doc": "Minimum acceptable average debtor risk score (0–100, 0 = no gate)."
+        },
+        {
+          "name": "TreasuryFeeBps",
+          "field_type": "void",
+          "doc": "Treasury protocol fee (bps)."
+        },
+        {
+          "name": "ReserveAllocationBps",
+          "field_type": "void",
+          "doc": "Insurance reserve allocation from each fee collection (bps)."
+        },
+        {
+          "name": "MinReserveRatioBps",
+          "field_type": "void",
+          "doc": "Minimum treasury balance to retain after a grant release (bps of pre-release balance)."
+        }
+      ]
+    },
+    {
+      "name": "RepaymentApproval",
+      "kind": "struct",
+      "doc": "Pending repayment approval for a high-value invoice repayment.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "RiskTier",
+      "kind": "union",
+      "doc": "Risk tier assigned by verifiers",
+      "fields": [
+        {
+          "name": "AAA",
+          "field_type": "void"
+        },
+        {
+          "name": "AA",
+          "field_type": "void"
+        },
+        {
+          "name": "A",
+          "field_type": "void"
+        },
+        {
+          "name": "B",
+          "field_type": "void"
+        },
+        {
+          "name": "C",
+          "field_type": "void"
+        }
+      ]
+    },
+    {
+      "name": "RiskTierDefinition",
+      "kind": "struct",
+      "doc": "Versioned risk tier definition for governance-gated tier boundaries (Issue #674).\nDefines the score ranges that map risk scores (0–100) to risk tiers (AAA–C).\nVersion-locking ensures in-flight listings remain tied to the tier definition\nactive when they were created, preventing retroactive tier changes.",
+      "fields": [
+        {
+          "name": "a_max",
+          "field_type": "u32",
+          "doc": "Score range for A tier: aa_max+1..a_max"
+        },
+        {
+          "name": "aa_max",
+          "field_type": "u32",
+          "doc": "Score range for AA tier: aaa_max+1..aa_max"
+        },
+        {
+          "name": "aaa_max",
+          "field_type": "u32",
+          "doc": "Score range for AAA tier (top of range inclusive): 0..aaa_max"
+        },
+        {
+          "name": "activated_at",
+          "field_type": "u64",
+          "doc": "C tier: b_max+1..100 (always includes the top end)\nTimestamp when this version was activated"
+        },
+        {
+          "name": "b_max",
+          "field_type": "u32",
+          "doc": "Score range for B tier: a_max+1..b_max"
+        },
+        {
+          "name": "version",
+          "field_type": "u32",
+          "doc": "Version identifier for this tier definition (incremented on each governance update)"
+        }
+      ]
+    },
+    {
+      "name": "ScoreDispute",
+      "kind": "struct",
+      "doc": "A subject-initiated dispute against the subject's own risk score.\n\nRate-limited at the contract level (max one open dispute per subject per\n`SCORE_DISPUTE_RATE_WINDOW_SECS`) to prevent indefinite stalling of\nlegitimate low scores via repeated filings.",
+      "fields": [
+        {
+          "name": "evidence_cid",
+          "field_type": "Option<String>",
+          "doc": "Optional IPFS CID of supporting evidence provided by the subject."
+        },
+        {
+          "name": "filed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the dispute was filed."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing dispute ID."
+        },
+        {
+          "name": "reason",
+          "field_type": "String",
+          "doc": "Short human-readable reason for the dispute (max 256 chars)."
+        },
+        {
+          "name": "resolution_notes",
+          "field_type": "Option<String>",
+          "doc": "Free-text reasoning recorded on resolution for on-chain transparency."
+        },
+        {
+          "name": "resolved_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the dispute was resolved (0 if still open)."
+        },
+        {
+          "name": "resolved_by",
+          "field_type": "Option<Address>",
+          "doc": "Address that resolved the dispute (admin/governance; None if open)."
+        },
+        {
+          "name": "score_at_filing",
+          "field_type": "u32",
+          "doc": "The risk score at the time the dispute was filed (for audit trail)."
+        },
+        {
+          "name": "status",
+          "field_type": "ScoreDisputeStatus",
+          "doc": "Current status of the dispute."
+        },
+        {
+          "name": "subject",
+          "field_type": "Address",
+          "doc": "The SME or debtor address that filed the dispute."
+        }
+      ]
+    },
+    {
+      "name": "ScoreDisputeStatus",
+      "kind": "union",
+      "doc": "Status of a subject-initiated risk-score dispute.",
+      "fields": [
+        {
+          "name": "Open",
+          "field_type": "void",
+          "doc": "Dispute filed, score flagged \"under review\"."
+        },
+        {
+          "name": "Upheld",
+          "field_type": "void",
+          "doc": "Reviewer upheld the original score."
+        },
+        {
+          "name": "Adjusted",
+          "field_type": "void",
+          "doc": "Reviewer adjusted the score (new value stored on the SME profile)."
+        },
+        {
+          "name": "Dismissed",
+          "field_type": "void",
+          "doc": "Dispute was closed without a finding (e.g., subject withdrew it)."
+        }
+      ]
+    },
+    {
+      "name": "ShareSaleOffer",
+      "kind": "struct",
+      "doc": "An offer to sell a single fractional share of a position on the secondary market. (#563)",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "original_investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "share_index",
+          "field_type": "u32"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "SignerSetProposal",
+      "kind": "struct",
+      "doc": "A governance proposal to adjust the multisig signer set and threshold.\n\nThis meta-governance proposal allows the multisig itself to be reconfigured through\nformal proposal/voting/execution, ensuring signer set changes are subject to the same\ngovernance rigor as protocol parameter changes. The new signer set only activates\nafter its own timelock expires, preventing immediate control changes.",
+      "fields": [
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "new_signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "new_threshold",
+          "field_type": "u32"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "SmeProfile",
+      "kind": "struct",
+      "doc": "SME profile in the risk registry",
+      "fields": [
+        {
+          "name": "address",
+          "field_type": "Address"
+        },
+        {
+          "name": "compliance_attested",
+          "field_type": "bool"
+        },
+        {
+          "name": "credit_limit",
+          "field_type": "i128",
+          "doc": "Maximum aggregate exposure across active invoices (0 = unlimited)."
+        },
+        {
+          "name": "defaults",
+          "field_type": "u32"
+        },
+        {
+          "name": "registered_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "total_invoices",
+          "field_type": "u32"
+        },
+        {
+          "name": "verified",
+          "field_type": "bool"
+        },
+        {
+          "name": "verifier",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "TimelockKey",
+      "kind": "union",
+      "doc": "Storage keys used by the timelock module.",
+      "fields": [
+        {
+          "name": "Delay",
+          "field_type": "void",
+          "doc": "Configured delay (seconds) between proposal and execution."
+        },
+        {
+          "name": "NextId",
+          "field_type": "void",
+          "doc": "Monotonic counter used to derive proposal ids."
+        },
+        {
+          "name": "Proposal",
+          "field_type": "u64",
+          "doc": "A stored upgrade proposal, keyed by proposal id."
+        }
+      ]
+    },
+    {
+      "name": "UpgradeProposal",
+      "kind": "struct",
+      "doc": "A proposed upgrade awaiting its timelock delay.",
+      "fields": [
+        {
+          "name": "cancelled",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been cancelled."
+        },
+        {
+          "name": "executed",
+          "field_type": "bool",
+          "doc": "Whether the proposal has already been executed."
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp at which the proposal was created."
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "The account that proposed the upgrade."
+        },
+        {
+          "name": "wasm_hash",
+          "field_type": "BytesN<32>",
+          "doc": "The proposed WASM hash to upgrade to."
+        }
+      ]
+    },
+    {
+      "name": "VerifierAction",
+      "kind": "union",
+      "doc": "Verifier management actions governed by the governance process.",
+      "fields": [
+        {
+          "name": "OnboardVerifier",
+          "field_type": "Address",
+          "doc": "Onboard a new verifier to the risk registry"
+        },
+        {
+          "name": "RemoveVerifier",
+          "field_type": "Address",
+          "doc": "Remove an existing verifier from the risk registry"
+        }
+      ]
+    },
+    {
+      "name": "VerifierProposal",
+      "kind": "struct",
+      "doc": "A governance proposal for verifier onboarding or removal.\n\nReuses the B2 multisig signer set for gating and a B1-style timelock before execution.\nEnsures verifier trust is maintained through the same governance rigor as protocol parameters.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "VerifierAction"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "WithdrawalRequest",
+      "kind": "struct",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "filled_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        }
+      ]
+    }
+  ],
+  "structs": [
+    {
+      "name": "AllocationDrift",
+      "doc": "Result of an allocation drift check (Issue #673).\nIdentifies assets where actual holdings deviate from policy targets.",
+      "fields": [
+        {
+          "name": "asset",
+          "field_type": "Address"
+        },
+        {
+          "name": "current_allocation_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "drifted_below",
+          "field_type": "bool",
+          "doc": "true if current_allocation < target_min, false if > target_max"
+        },
+        {
+          "name": "target_max_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "target_min_bps",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "AmountBounds",
+      "doc": "Per-risk-tier face-value bounds for invoice minting/listing.",
+      "fields": [
+        {
+          "name": "max",
+          "field_type": "i128"
+        },
+        {
+          "name": "min",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "AssetAllocationPolicy",
+      "doc": "Asset allocation policy for treasury diversification (Issue #673).\nDefines target allocation ranges for each asset type to prevent unintended\nconcentration of treasury holdings. Used by check_allocation_drift to identify\nwhen actual holdings deviate from policy parameters.",
+      "fields": [
+        {
+          "name": "asset",
+          "field_type": "Address"
+        },
+        {
+          "name": "max_allocation_bps",
+          "field_type": "u32",
+          "doc": "Maximum target allocation as a percentage (0–100, in basis points where 10000 = 100%)"
+        },
+        {
+          "name": "min_allocation_bps",
+          "field_type": "u32",
+          "doc": "Minimum target allocation as a percentage (0–100, in basis points where 10000 = 100%)"
+        },
+        {
+          "name": "updated_at",
+          "field_type": "u64",
+          "doc": "Timestamp when this policy was last updated"
+        }
+      ]
+    },
+    {
+      "name": "AuditEntry",
+      "doc": "A single audit log entry.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "String"
+        },
+        {
+          "name": "actor",
+          "field_type": "Address"
+        },
+        {
+          "name": "sequence",
+          "field_type": "u64"
+        },
+        {
+          "name": "timestamp",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "BatchInvoiceInput",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "Bid",
+      "doc": "A reverse-auction bid submitted by an investor (#440).\n\nStored under `DataKey::Bid(invoice_id, investor)`.\nThe investor commits to funding `amount` tokens at `bid_price` total.\n`bid_price` must be <= current asking price and >= the floor price (if a\ndecay schedule is active).",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128",
+          "doc": "The token amount the investor proposes to contribute."
+        },
+        {
+          "name": "bid_price",
+          "field_type": "i128",
+          "doc": "The total price the investor is willing to pay for their `amount` share.\nMust satisfy `bid_price <= current_asking_price`."
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitted_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the bid was submitted."
+        }
+      ]
+    },
+    {
+      "name": "CommunityProposal",
+      "doc": "A community proposal staged for signer review (Issue #672).\nNon-signers can submit proposals; signers then review and formally sponsor them\nfor inclusion in the multisig governance workflow.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "description",
+          "field_type": "String"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitted_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "submitter",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "ContributorBadge",
+      "doc": "On-chain record for a single contributor badge (non-transferable).\n\nThe badge is \"soulbound\" — the `owner` field is set at mint and the\ncontract's `transfer` entry-point is intentionally absent.  The only\nstate transitions allowed are `Active → Revoked` (admin revocation for\nfraudulent/erroneous badges).",
+      "fields": [
+        {
+          "name": "category",
+          "field_type": "BadgeCategory",
+          "doc": "Badge category (Code / Security / Community)."
+        },
+        {
+          "name": "description",
+          "field_type": "String",
+          "doc": "Short human-readable description of the contribution (max 128 chars)."
+        },
+        {
+          "name": "evidence_cid",
+          "field_type": "String",
+          "doc": "IPFS CID of supporting evidence or linked PR/report."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing badge ID."
+        },
+        {
+          "name": "minted_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the badge was minted."
+        },
+        {
+          "name": "owner",
+          "field_type": "Address",
+          "doc": "Address this badge is permanently bound to."
+        },
+        {
+          "name": "revocation_reason",
+          "field_type": "Option<String>",
+          "doc": "Optional free-text reason for revocation."
+        },
+        {
+          "name": "revoked",
+          "field_type": "bool",
+          "doc": "Whether this badge has been revoked."
+        },
+        {
+          "name": "revoked_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when revoked (0 if not revoked)."
+        }
+      ]
+    },
+    {
+      "name": "DecaySchedule",
+      "doc": "Dutch-auction / linear-decay price schedule for a listing (#439).\n\nWhen attached to a listing via `DataKey::DecaySchedule(invoice_id)`, the\neffective asking price decays linearly from `start_price` to `floor_price`\nover the window `[decay_start_ts, decay_end_ts]`.\n\n- Before `decay_start_ts`  : price == `start_price` (original asking price)\n- After  `decay_end_ts`    : price == `floor_price`  (floor)\n- In between               : linear interpolation\n\n`floor_price` must be > 0 and < `start_price`.\n`decay_end_ts` must be <= `funding_deadline` of the listing.",
+      "fields": [
+        {
+          "name": "decay_end_ts",
+          "field_type": "u64",
+          "doc": "Timestamp at which the price reaches `floor_price` (and stays there)."
+        },
+        {
+          "name": "decay_start_ts",
+          "field_type": "u64",
+          "doc": "Timestamp at which price decay begins."
+        },
+        {
+          "name": "floor_price",
+          "field_type": "i128",
+          "doc": "The minimum (floor) price the listing will reach."
+        },
+        {
+          "name": "start_price",
+          "field_type": "i128",
+          "doc": "The initial (ceiling) price — mirrors `Listing::asking_price`."
+        }
+      ]
+    },
+    {
+      "name": "DiscretionaryWithdrawal",
+      "doc": "A timelocked, multi-approver discretionary treasury withdrawal proposal.\n\nThis is the *strictly separate* path from the fee-sweep and grant-disbursement\nflows — any ad-hoc discretionary withdrawal must go through this proposal\nlifecycle rather than the direct `withdraw` admin path.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128",
+          "doc": "Amount to withdraw."
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>",
+          "doc": "Addresses that have approved (quorum tracked against access_control multisig config)."
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been cancelled."
+        },
+        {
+          "name": "executable_after",
+          "field_type": "u64",
+          "doc": "Ledger timestamp before which the proposal cannot be executed (timelock)."
+        },
+        {
+          "name": "executed",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been executed."
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp after which the proposal expires."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing proposal ID."
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when proposed."
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "Proposer address."
+        },
+        {
+          "name": "purpose",
+          "field_type": "String",
+          "doc": "Free-text purpose description (max 256 chars) for on-chain transparency."
+        },
+        {
+          "name": "recipient",
+          "field_type": "Address",
+          "doc": "Destination address (must be on the recipient allowlist)."
+        },
+        {
+          "name": "token",
+          "field_type": "Address",
+          "doc": "Token to withdraw."
+        }
+      ]
+    },
+    {
+      "name": "Dispute",
+      "doc": "Dispute state for an invoice under governance review. (#565)",
+      "fields": [
+        {
+          "name": "challenger",
+          "field_type": "Address"
+        },
+        {
+          "name": "evidence_cid",
+          "field_type": "Option<String>"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "opened_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "resolved",
+          "field_type": "bool"
+        },
+        {
+          "name": "resolved_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "upheld",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "EarlySettlementOffer",
+      "doc": "An SME's early-termination buyout offer for a funded invoice.\n\nThe SME escrows `amount` (a discount to `total_owed`) into the pool; investors then\naccept, and once investors representing 100% of pool shares have accepted, the escrow\nis distributed pro-rata and the pool closes.",
+      "fields": [
+        {
+          "name": "accepted",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "accepted_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Installment",
+      "doc": "A single scheduled repayment installment.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "paid",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "InstallmentSchedule",
+      "doc": "An installment repayment schedule attached to a financing pool.",
+      "fields": [
+        {
+          "name": "installments",
+          "field_type": "Vec<Installment>"
+        },
+        {
+          "name": "next_index",
+          "field_type": "u32",
+          "doc": "Index of the next unpaid installment."
+        }
+      ]
+    },
+    {
+      "name": "Invoice",
+      "doc": "Core invoice NFT data stored on-chain\n\nSchema version: 2 (see docs/MIGRATIONS.md for upgrade history)\n\nVersion history:\nv1 — original fields through `repaid_at`\nv2 — added `notes: Option<String>` for optional free-text memo (migration in invoice_nft::migrate)",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "metadata_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>",
+          "doc": "Optional free-text memo attached at minting time. Added in schema v2.\nPre-existing records will have this field set to None by invoice_nft::migrate."
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceCold",
+      "doc": "Rarely-accessed metadata fields stored under `InvoiceCold(id)`.",
+      "fields": [
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "metadata_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "notes",
+          "field_type": "Option<String>"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceHot",
+      "doc": "Frequently-accessed invoice fields stored under `InvoiceHot(id)`.\nStatus transitions read and write only this key.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "InvoiceV1",
+      "doc": "Schema v1 Invoice (no `notes` field). Used by migrate() v1→v2 step.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "currency",
+          "field_type": "Symbol"
+        },
+        {
+          "name": "debtor_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "due_date",
+          "field_type": "u64"
+        },
+        {
+          "name": "funded_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "ipfs_cid",
+          "field_type": "String"
+        },
+        {
+          "name": "repaid_at",
+          "field_type": "Option<u64>"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "risk_tier",
+          "field_type": "RiskTier"
+        },
+        {
+          "name": "sme",
+          "field_type": "Address"
+        },
+        {
+          "name": "status",
+          "field_type": "InvoiceStatus"
+        }
+      ]
+    },
+    {
+      "name": "KeyRotationProposal",
+      "doc": "Proposed key rotation pending timelock",
+      "fields": [
+        {
+          "name": "new_key",
+          "field_type": "Address",
+          "doc": "New key being rotated in"
+        },
+        {
+          "name": "old_key",
+          "field_type": "Address",
+          "doc": "Old key being rotated out"
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Timestamp when rotation was proposed"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "Who proposed the rotation (for audit trail)"
+        },
+        {
+          "name": "rotation_type",
+          "field_type": "KeyRotationType",
+          "doc": "Type of rotation"
+        }
+      ]
+    },
+    {
+      "name": "Listing",
+      "doc": "A marketplace listing for an invoice",
+      "fields": [
+        {
+          "name": "asking_price",
+          "field_type": "i128"
+        },
+        {
+          "name": "bidding_deadline",
+          "field_type": "Option<u64>",
+          "doc": "Optional deadline for the reverse-auction bidding window (#440).\nWhen `Some`, direct `fund_invoice` calls are rejected until\n`accept_bids` converts winning bids into positions.\nWhen `None`, the listing uses the standard first-come-first-served flow."
+        },
+        {
+          "name": "face_value",
+          "field_type": "i128"
+        },
+        {
+          "name": "funded_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "funding_deadline",
+          "field_type": "u64"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "is_active",
+          "field_type": "bool"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "MetadataDispute",
+      "fields": [
+        {
+          "name": "challenger",
+          "field_type": "Address"
+        },
+        {
+          "name": "evidence_hash",
+          "field_type": "Bytes"
+        },
+        {
+          "name": "raised_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "resolved",
+          "field_type": "bool"
+        },
+        {
+          "name": "upheld",
+          "field_type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "MintRateLimit",
+      "fields": [
+        {
+          "name": "max_mints",
+          "field_type": "u32"
+        },
+        {
+          "name": "window_secs",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "MultisigConfig",
+      "doc": "Multisig configuration",
+      "fields": [
+        {
+          "name": "signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "threshold",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "ParameterProposal",
+      "doc": "A governance proposal to change a single protocol parameter.\n\nReuses the B2 multisig signer set for gating and a B1-style timelock before execution.",
+      "fields": [
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "key",
+          "field_type": "ParameterKey"
+        },
+        {
+          "name": "new_value",
+          "field_type": "u32"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "PendingAction",
+      "doc": "A privileged action awaiting a quorum of co-signer approvals.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "action_hash",
+          "field_type": "BytesN<32>"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "Pool",
+      "doc": "Pool state for a funded invoice",
+      "fields": [
+        {
+          "name": "face_value",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "is_closed",
+          "field_type": "bool"
+        },
+        {
+          "name": "late_penalty_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "penalty_applied",
+          "field_type": "bool"
+        },
+        {
+          "name": "repaid_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        },
+        {
+          "name": "total_funded",
+          "field_type": "i128"
+        },
+        {
+          "name": "total_owed",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "Position",
+      "doc": "A single investor position in a pool",
+      "fields": [
+        {
+          "name": "contributed",
+          "field_type": "i128"
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "share_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "yield_claimed",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "PositionSaleOffer",
+      "doc": "An active offer to sell an investor position on the secondary market",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "PositionShare",
+      "doc": "A fractional claim on a Position, enabling secondary-market transfers\nbefore the underlying invoice is repaid or defaulted. (#563)",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "original_investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "owner",
+          "field_type": "Address"
+        },
+        {
+          "name": "share_index",
+          "field_type": "u32"
+        }
+      ]
+    },
+    {
+      "name": "Proposal",
+      "doc": "A multisig proposal awaiting approval",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "AdminAction"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "ProtocolConfig",
+      "doc": "Protocol-level configuration.\n\nNote: pause state is NOT stored here — it is owned exclusively by the\nAccessControl contract to avoid split-brain between two sources of truth.",
+      "fields": [
+        {
+          "name": "fee_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "late_penalty_bps",
+          "field_type": "u32"
+        },
+        {
+          "name": "max_risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "min_funding_period",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "ProtocolStats",
+      "doc": "Protocol-wide aggregate statistics tracked by the financing pool.",
+      "fields": [
+        {
+          "name": "active_pools",
+          "field_type": "u32"
+        },
+        {
+          "name": "pools_defaulted",
+          "field_type": "u32"
+        },
+        {
+          "name": "pools_opened",
+          "field_type": "u32"
+        },
+        {
+          "name": "total_repaid",
+          "field_type": "i128"
+        }
+      ]
+    },
+    {
+      "name": "QueuePointers",
+      "fields": [
+        {
+          "name": "head",
+          "field_type": "u64"
+        },
+        {
+          "name": "next_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "tail",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "RecoveryProposal",
+      "doc": "A multisig signer recovery proposal for lost-key scenarios.\nAllows reconfiguring the signer set after a long timelock if quorum becomes unreachable.",
+      "fields": [
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "new_signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "new_threshold",
+          "field_type": "u32"
+        },
+        {
+          "name": "objections",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "RegistryParam",
+      "doc": "A single governed parameter value.\n\nParameters are stored as `i128` to accommodate both `u32` fee rates\n(which fit comfortably) and `i128` token amounts like `minimum_stake`.\nConsuming contracts are responsible for casting back to the expected type\nafter reading; the registry enforces only the supplied min/max bounds.",
+      "fields": [
+        {
+          "name": "max_value",
+          "field_type": "i128",
+          "doc": "Upper bound (inclusive) for governance proposals (0 = no upper bound)."
+        },
+        {
+          "name": "min_value",
+          "field_type": "i128",
+          "doc": "Lower bound (inclusive) for governance proposals (0 = no lower bound)."
+        },
+        {
+          "name": "updated_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when this value was last updated."
+        },
+        {
+          "name": "updated_by",
+          "field_type": "Address",
+          "doc": "Address that last updated this value (governance contract or admin)."
+        },
+        {
+          "name": "value",
+          "field_type": "i128",
+          "doc": "The current governed value."
+        }
+      ]
+    },
+    {
+      "name": "RepaymentApproval",
+      "doc": "Pending repayment approval for a high-value invoice repayment.",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "RiskTierDefinition",
+      "doc": "Versioned risk tier definition for governance-gated tier boundaries (Issue #674).\nDefines the score ranges that map risk scores (0–100) to risk tiers (AAA–C).\nVersion-locking ensures in-flight listings remain tied to the tier definition\nactive when they were created, preventing retroactive tier changes.",
+      "fields": [
+        {
+          "name": "a_max",
+          "field_type": "u32",
+          "doc": "Score range for A tier: aa_max+1..a_max"
+        },
+        {
+          "name": "aa_max",
+          "field_type": "u32",
+          "doc": "Score range for AA tier: aaa_max+1..aa_max"
+        },
+        {
+          "name": "aaa_max",
+          "field_type": "u32",
+          "doc": "Score range for AAA tier (top of range inclusive): 0..aaa_max"
+        },
+        {
+          "name": "activated_at",
+          "field_type": "u64",
+          "doc": "C tier: b_max+1..100 (always includes the top end)\nTimestamp when this version was activated"
+        },
+        {
+          "name": "b_max",
+          "field_type": "u32",
+          "doc": "Score range for B tier: a_max+1..b_max"
+        },
+        {
+          "name": "version",
+          "field_type": "u32",
+          "doc": "Version identifier for this tier definition (incremented on each governance update)"
+        }
+      ]
+    },
+    {
+      "name": "ScoreDispute",
+      "doc": "A subject-initiated dispute against the subject's own risk score.\n\nRate-limited at the contract level (max one open dispute per subject per\n`SCORE_DISPUTE_RATE_WINDOW_SECS`) to prevent indefinite stalling of\nlegitimate low scores via repeated filings.",
+      "fields": [
+        {
+          "name": "evidence_cid",
+          "field_type": "Option<String>",
+          "doc": "Optional IPFS CID of supporting evidence provided by the subject."
+        },
+        {
+          "name": "filed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the dispute was filed."
+        },
+        {
+          "name": "id",
+          "field_type": "u64",
+          "doc": "Monotonically-incrementing dispute ID."
+        },
+        {
+          "name": "reason",
+          "field_type": "String",
+          "doc": "Short human-readable reason for the dispute (max 256 chars)."
+        },
+        {
+          "name": "resolution_notes",
+          "field_type": "Option<String>",
+          "doc": "Free-text reasoning recorded on resolution for on-chain transparency."
+        },
+        {
+          "name": "resolved_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp when the dispute was resolved (0 if still open)."
+        },
+        {
+          "name": "resolved_by",
+          "field_type": "Option<Address>",
+          "doc": "Address that resolved the dispute (admin/governance; None if open)."
+        },
+        {
+          "name": "score_at_filing",
+          "field_type": "u32",
+          "doc": "The risk score at the time the dispute was filed (for audit trail)."
+        },
+        {
+          "name": "status",
+          "field_type": "ScoreDisputeStatus",
+          "doc": "Current status of the dispute."
+        },
+        {
+          "name": "subject",
+          "field_type": "Address",
+          "doc": "The SME or debtor address that filed the dispute."
+        }
+      ]
+    },
+    {
+      "name": "ShareSaleOffer",
+      "doc": "An offer to sell a single fractional share of a position on the secondary market. (#563)",
+      "fields": [
+        {
+          "name": "invoice_id",
+          "field_type": "u64"
+        },
+        {
+          "name": "original_investor",
+          "field_type": "Address"
+        },
+        {
+          "name": "price",
+          "field_type": "i128"
+        },
+        {
+          "name": "seller",
+          "field_type": "Address"
+        },
+        {
+          "name": "share_index",
+          "field_type": "u32"
+        },
+        {
+          "name": "token",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "SignerSetProposal",
+      "doc": "A governance proposal to adjust the multisig signer set and threshold.\n\nThis meta-governance proposal allows the multisig itself to be reconfigured through\nformal proposal/voting/execution, ensuring signer set changes are subject to the same\ngovernance rigor as protocol parameter changes. The new signer set only activates\nafter its own timelock expires, preventing immediate control changes.",
+      "fields": [
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "new_signers",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "new_threshold",
+          "field_type": "u32"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "SmeProfile",
+      "doc": "SME profile in the risk registry",
+      "fields": [
+        {
+          "name": "address",
+          "field_type": "Address"
+        },
+        {
+          "name": "compliance_attested",
+          "field_type": "bool"
+        },
+        {
+          "name": "credit_limit",
+          "field_type": "i128",
+          "doc": "Maximum aggregate exposure across active invoices (0 = unlimited)."
+        },
+        {
+          "name": "defaults",
+          "field_type": "u32"
+        },
+        {
+          "name": "registered_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "risk_score",
+          "field_type": "u32"
+        },
+        {
+          "name": "total_invoices",
+          "field_type": "u32"
+        },
+        {
+          "name": "verified",
+          "field_type": "bool"
+        },
+        {
+          "name": "verifier",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "UpgradeProposal",
+      "doc": "A proposed upgrade awaiting its timelock delay.",
+      "fields": [
+        {
+          "name": "cancelled",
+          "field_type": "bool",
+          "doc": "Whether the proposal has been cancelled."
+        },
+        {
+          "name": "executed",
+          "field_type": "bool",
+          "doc": "Whether the proposal has already been executed."
+        },
+        {
+          "name": "proposed_at",
+          "field_type": "u64",
+          "doc": "Ledger timestamp at which the proposal was created."
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address",
+          "doc": "The account that proposed the upgrade."
+        },
+        {
+          "name": "wasm_hash",
+          "field_type": "BytesN<32>",
+          "doc": "The proposed WASM hash to upgrade to."
+        }
+      ]
+    },
+    {
+      "name": "VerifierProposal",
+      "doc": "A governance proposal for verifier onboarding or removal.\n\nReuses the B2 multisig signer set for gating and a B1-style timelock before execution.\nEnsures verifier trust is maintained through the same governance rigor as protocol parameters.",
+      "fields": [
+        {
+          "name": "action",
+          "field_type": "VerifierAction"
+        },
+        {
+          "name": "approvals",
+          "field_type": "Vec<Address>"
+        },
+        {
+          "name": "cancelled",
+          "field_type": "bool"
+        },
+        {
+          "name": "created_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "executed",
+          "field_type": "bool"
+        },
+        {
+          "name": "expires_at",
+          "field_type": "u64"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "proposer",
+          "field_type": "Address"
+        }
+      ]
+    },
+    {
+      "name": "WithdrawalRequest",
+      "fields": [
+        {
+          "name": "amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "filled_amount",
+          "field_type": "i128"
+        },
+        {
+          "name": "id",
+          "field_type": "u64"
+        },
+        {
+          "name": "investor",
+          "field_type": "Address"
+        }
+      ]
+    }
+  ],
+  "unions": [
+    {
+      "name": "AdminAction",
+      "doc": "Action types that can be proposed for multisig execution",
+      "cases": [
+        {
+          "name": "Pause",
+          "tuple_types": []
+        },
+        {
+          "name": "Unpause",
+          "tuple_types": []
+        },
+        {
+          "name": "GrantRole",
+          "tuple_types": [
+            "Address",
+            "u32"
+          ]
+        },
+        {
+          "name": "RevokeRole",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "TransferAdmin",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "RotateAdmin",
+          "doc": "Rotate the admin key to a new address.\nIdentical effect to `TransferAdmin` but signals deliberate key-rotation\nsemantics (e.g. after a suspected compromise) rather than an ordinary\nownership handoff. Emits a dedicated `admin_rotated` event for\noff-chain monitoring to alert on.",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "ResolveDispute",
+          "doc": "Resolve a dispute through governance (Issue #671).\nRequires multisig quorum approval and governance timelock.\nParameters: (dispute_resolver, invoice_id, upheld)",
+          "tuple_types": [
+            "Address",
+            "u64",
+            "bool"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AuditSource",
+      "doc": "Identifies which contract originated the admin action.",
+      "cases": [
+        {
+          "name": "AccessControl",
+          "tuple_types": []
+        },
+        {
+          "name": "Treasury",
+          "tuple_types": []
+        },
+        {
+          "name": "RiskRegistry",
+          "tuple_types": []
+        },
+        {
+          "name": "InvoiceNft",
+          "tuple_types": []
+        },
+        {
+          "name": "ParameterRegistry",
+          "tuple_types": []
+        },
+        {
+          "name": "ContributorBadges",
+          "tuple_types": []
+        },
+        {
+          "name": "Marketplace",
+          "tuple_types": []
+        },
+        {
+          "name": "FinancingPool",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "BadgeCategory",
+      "doc": "Category of a contributor badge.  Determines the minting-authority check\nand may be used by future governance-weight integrations.",
+      "cases": [
+        {
+          "name": "Code",
+          "doc": "Merged Wave issue or significant code contribution.",
+          "tuple_types": []
+        },
+        {
+          "name": "Security",
+          "doc": "Verified security finding (bug bounty / audit).",
+          "tuple_types": []
+        },
+        {
+          "name": "Community",
+          "doc": "Community service: verifier participation, governance, documentation.",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "DataKey",
+      "cases": [
+        {
+          "name": "NextId",
+          "doc": "Next invoice ID to assign.",
+          "tuple_types": []
+        },
+        {
+          "name": "Admin",
+          "doc": "Admin address.",
+          "tuple_types": []
+        },
+        {
+          "name": "PendingAdmin",
+          "doc": "Pending new admin (two-step transfer).",
+          "tuple_types": []
+        },
+        {
+          "name": "AccessControl",
+          "doc": "Access control contract address.",
+          "tuple_types": []
+        },
+        {
+          "name": "MigrationVersion",
+          "doc": "Current schema migration version.",
+          "tuple_types": []
+        },
+        {
+          "name": "UpgradeProposal",
+          "doc": "Pending WASM upgrade proposal: (wasm_hash, proposed_at).",
+          "tuple_types": []
+        },
+        {
+          "name": "Marketplace",
+          "doc": "Authorized marketplace contract address.",
+          "tuple_types": []
+        },
+        {
+          "name": "FinancingPool",
+          "doc": "Authorized financing pool contract address.",
+          "tuple_types": []
+        },
+        {
+          "name": "RiskRegistry",
+          "doc": "Authorized risk registry contract address.",
+          "tuple_types": []
+        },
+        {
+          "name": "DebtorAttestation",
+          "doc": "Debtor attestation contract address (discoverable per deployment).",
+          "tuple_types": []
+        },
+        {
+          "name": "ProtocolConfig",
+          "doc": "Protocol-wide configuration.",
+          "tuple_types": []
+        },
+        {
+          "name": "AuditLogHead",
+          "doc": "Next write position in the admin audit ring buffer.",
+          "tuple_types": []
+        },
+        {
+          "name": "AuditLogTotal",
+          "doc": "Total admin actions ever recorded (monotonic).",
+          "tuple_types": []
+        },
+        {
+          "name": "NextBatchId",
+          "doc": "Monotonic counter for batch-mint correlation IDs.",
+          "tuple_types": []
+        },
+        {
+          "name": "MintRateLimit",
+          "doc": "Per-SME mint velocity cap config.",
+          "tuple_types": []
+        },
+        {
+          "name": "AmountBounds",
+          "doc": "Per-risk-tier face-value bounds.",
+          "tuple_types": [
+            "RiskTier"
+          ]
+        },
+        {
+          "name": "InvoiceHot",
+          "doc": "HOT: status + financial fields for an invoice. Read on every transition.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "InvoiceCold",
+          "doc": "COLD: metadata fields for an invoice. Read only for get_invoice / metadata ops.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "OutstandingExposure",
+          "doc": "Aggregate outstanding exposure for an SME.",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "CurrencyAllowlist",
+          "doc": "Currency symbol allowlist entry.",
+          "tuple_types": [
+            "Symbol"
+          ]
+        },
+        {
+          "name": "InvoiceFrozen",
+          "doc": "Per-invoice freeze flag.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "MetadataDispute",
+          "doc": "Open or resolved metadata-hash dispute for an invoice.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "AuditEntry",
+          "doc": "Ring-buffer audit log entry at position n.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "SmeInvoiceIds",
+          "doc": "Vec<u64> of invoice IDs minted by an SME, in mint order.",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "SmeMintWindow",
+          "doc": "Rolling mint window state for an SME: (window_start_ts, mints_used).",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "MetadataCidHistory",
+          "doc": "Bounded history of prior IPFS CIDs for an invoice.",
+          "tuple_types": [
+            "u64"
+          ]
+        },
+        {
+          "name": "FirstMint",
+          "doc": "Invoice ID of the first invoice ever minted by an SME (set once, never updated).",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "SmeReferrer",
+          "doc": "Referrer attributed to an SME on their first mint.",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "Invoice",
+          "doc": "v1/v2 full Invoice struct — read during migrate() v2→v3, then removed.",
+          "tuple_types": [
+            "u64"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "GuardKey",
+      "doc": "Storage key for the reentrancy lock.",
+      "cases": [
+        {
+          "name": "Lock",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "InvoiceStatus",
+      "doc": "Invoice lifecycle status",
+      "cases": [
+        {
+          "name": "Created",
+          "tuple_types": []
+        },
+        {
+          "name": "Listed",
+          "tuple_types": []
+        },
+        {
+          "name": "Funded",
+          "tuple_types": []
+        },
+        {
+          "name": "Repaid",
+          "tuple_types": []
+        },
+        {
+          "name": "Defaulted",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "KeyRotationType",
+      "doc": "Type of key being rotated",
+      "cases": [
+        {
+          "name": "MultisigSigner",
+          "doc": "Multi-sig co-signer rotation",
+          "tuple_types": []
+        },
+        {
+          "name": "Verifier",
+          "doc": "Verifier key rotation",
+          "tuple_types": []
+        },
+        {
+          "name": "Admin",
+          "doc": "Admin key rotation",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "ParameterKey",
+      "doc": "A tunable protocol parameter governed by the parameter-change process.",
+      "cases": [
+        {
+          "name": "FeeBps",
+          "tuple_types": []
+        },
+        {
+          "name": "LatePenaltyBps",
+          "tuple_types": []
+        },
+        {
+          "name": "MaxRiskScore",
+          "tuple_types": []
+        },
+        {
+          "name": "TimelockDelay",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "QueueStorageKey",
+      "cases": [
+        {
+          "name": "Pointers",
+          "tuple_types": []
+        },
+        {
+          "name": "Request",
+          "tuple_types": [
+            "u64"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "RegistryParamKey",
+      "doc": "Keys identifying every governable protocol parameter stored in\n`parameter_registry`.  The same enum is used by consuming contracts to\nindex their local cache, so callers never pass raw strings.\n\nAdding a new parameter: append a new variant here and handle it in\n`parameter_registry`'s `set_parameter` dispatch.",
+      "cases": [
+        {
+          "name": "MarketplaceFeeBps",
+          "doc": "Base protocol fee in basis points (0–10 000).",
+          "tuple_types": []
+        },
+        {
+          "name": "ReferrerSplitBps",
+          "doc": "Fraction of the protocol fee routed to the referrer (0–10 000 bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "MinContributionAmount",
+          "doc": "Minimum contribution floor per fund_invoice call (in token's smallest unit).",
+          "tuple_types": []
+        },
+        {
+          "name": "TierFeeAaa",
+          "doc": "Per-risk-tier fee override — AAA tier (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "TierFeeAa",
+          "doc": "Per-risk-tier fee override — AA tier (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "TierFeeA",
+          "doc": "Per-risk-tier fee override — A tier (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "TierFeeB",
+          "doc": "Per-risk-tier fee override — B tier (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "TierFeeC",
+          "doc": "Per-risk-tier fee override — C tier (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "LatePenaltyBps",
+          "doc": "Late-repayment penalty rate (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "LatePenaltyTreasurySplitBps",
+          "doc": "Fraction of late penalty routed to treasury vs investors (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "MaxPositionBps",
+          "doc": "Maximum per-investor concentration per pool (bps, 1–10 000).",
+          "tuple_types": []
+        },
+        {
+          "name": "GracePeriodSecs",
+          "doc": "Grace period before a late invoice can be defaulted (seconds).",
+          "tuple_types": []
+        },
+        {
+          "name": "MinimumVerifierStake",
+          "doc": "Minimum stake amount for a verifier (in staking token's smallest unit).",
+          "tuple_types": []
+        },
+        {
+          "name": "SlashPercentageBps",
+          "doc": "Fraction of stake to slash per SME default (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "MinimumDebtorScore",
+          "doc": "Minimum acceptable average debtor risk score (0–100, 0 = no gate).",
+          "tuple_types": []
+        },
+        {
+          "name": "TreasuryFeeBps",
+          "doc": "Treasury protocol fee (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "ReserveAllocationBps",
+          "doc": "Insurance reserve allocation from each fee collection (bps).",
+          "tuple_types": []
+        },
+        {
+          "name": "MinReserveRatioBps",
+          "doc": "Minimum treasury balance to retain after a grant release (bps of pre-release balance).",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "RiskTier",
+      "doc": "Risk tier assigned by verifiers",
+      "cases": [
+        {
+          "name": "AAA",
+          "tuple_types": []
+        },
+        {
+          "name": "AA",
+          "tuple_types": []
+        },
+        {
+          "name": "A",
+          "tuple_types": []
+        },
+        {
+          "name": "B",
+          "tuple_types": []
+        },
+        {
+          "name": "C",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "ScoreDisputeStatus",
+      "doc": "Status of a subject-initiated risk-score dispute.",
+      "cases": [
+        {
+          "name": "Open",
+          "doc": "Dispute filed, score flagged \"under review\".",
+          "tuple_types": []
+        },
+        {
+          "name": "Upheld",
+          "doc": "Reviewer upheld the original score.",
+          "tuple_types": []
+        },
+        {
+          "name": "Adjusted",
+          "doc": "Reviewer adjusted the score (new value stored on the SME profile).",
+          "tuple_types": []
+        },
+        {
+          "name": "Dismissed",
+          "doc": "Dispute was closed without a finding (e.g., subject withdrew it).",
+          "tuple_types": []
+        }
+      ]
+    },
+    {
+      "name": "TimelockKey",
+      "doc": "Storage keys used by the timelock module.",
+      "cases": [
+        {
+          "name": "Delay",
+          "doc": "Configured delay (seconds) between proposal and execution.",
+          "tuple_types": []
+        },
+        {
+          "name": "NextId",
+          "doc": "Monotonic counter used to derive proposal ids.",
+          "tuple_types": []
+        },
+        {
+          "name": "Proposal",
+          "doc": "A stored upgrade proposal, keyed by proposal id.",
+          "tuple_types": [
+            "u64"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "VerifierAction",
+      "doc": "Verifier management actions governed by the governance process.",
+      "cases": [
+        {
+          "name": "OnboardVerifier",
+          "doc": "Onboard a new verifier to the risk registry",
+          "tuple_types": [
+            "Address"
+          ]
+        },
+        {
+          "name": "RemoveVerifier",
+          "doc": "Remove an existing verifier from the risk registry",
+          "tuple_types": [
+            "Address"
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "name": "CommonError",
+      "doc": "Common validation/arithmetic errors shared by every contract's\n`kora_shared::validation` and `kora_shared::reentrancy` helpers.\n\nKept deliberately small: Soroban's `#[contracterror]` macro caps an error\nenum at 50 variants (`SCSpecUDTErrorEnumV0.cases<50>` in the XDR spec).\nDomain-specific errors belong on each contract's own local error enum,\nwhich implements `From<CommonError>` so `?` still works through the\nshared validation helpers.",
+      "cases": [
+        {
+          "name": "InvalidAmount",
+          "value": 1
+        },
+        {
+          "name": "InvalidDueDate",
+          "value": 2
+        },
+        {
+          "name": "InvalidRiskScore",
+          "value": 3
+        },
+        {
+          "name": "InvalidCid",
+          "value": 4
+        },
+        {
+          "name": "InvalidFeeRate",
+          "value": 5
+        },
+        {
+          "name": "InvalidAddress",
+          "value": 6
+        },
+        {
+          "name": "EmptyString",
+          "value": 7
+        },
+        {
+          "name": "EmptyBytes",
+          "value": 8
+        },
+        {
+          "name": "FieldTooLong",
+          "value": 9
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "value": 10
+        },
+        {
+          "name": "ArithmeticUnderflow",
+          "doc": "Returned by `safe_sub` when the result would underflow (a < b).",
+          "value": 11
+        },
+        {
+          "name": "Reentrancy",
+          "doc": "Reentrancy guard triggered.",
+          "value": 12
+        },
+        {
+          "name": "InvalidLength",
+          "value": 13
+        },
+        {
+          "name": "BatchSizeExceeded",
+          "value": 14
+        }
+      ]
+    },
+    {
+      "name": "InvoiceNftError",
+      "cases": [
+        {
+          "name": "AlreadyInitialized",
+          "value": 1
+        },
+        {
+          "name": "ArithmeticOverflow",
+          "value": 2
+        },
+        {
+          "name": "BatchSizeExceeded",
+          "value": 3
+        },
+        {
+          "name": "CreditLimitExceeded",
+          "value": 4
+        },
+        {
+          "name": "CurrencyNotAllowed",
+          "value": 5
+        },
+        {
+          "name": "EmptyBytes",
+          "value": 6
+        },
+        {
+          "name": "EmptyString",
+          "value": 7
+        },
+        {
+          "name": "FieldTooLong",
+          "value": 8
+        },
+        {
+          "name": "InvalidAddress",
+          "value": 9
+        },
+        {
+          "name": "InvalidAmount",
+          "value": 10
+        },
+        {
+          "name": "InvalidDueDate",
+          "value": 11
+        },
+        {
+          "name": "InvalidInvoiceStatus",
+          "value": 12
+        },
+        {
+          "name": "InvalidRiskScore",
+          "value": 13
+        },
+        {
+          "name": "InvoiceNotFound",
+          "value": 14
+        },
+        {
+          "name": "NoUpgradeProposed",
+          "value": 15
+        },
+        {
+          "name": "NotAdmin",
+          "value": 16
+        },
+        {
+          "name": "NotInitialized",
+          "value": 17
+        },
+        {
+          "name": "NotInvoiceOwner",
+          "value": 18
+        },
+        {
+          "name": "ProtocolPaused",
+          "value": 19
+        },
+        {
+          "name": "Reentrancy",
+          "value": 20
+        },
+        {
+          "name": "SMENotRegistered",
+          "value": 21
+        },
+        {
+          "name": "Unauthorized",
+          "value": 22
+        },
+        {
+          "name": "UpgradeTimelockNotElapsed",
+          "value": 23
+        },
+        {
+          "name": "MintRateLimitExceeded",
+          "value": 24
+        },
+        {
+          "name": "InvalidParameterValue",
+          "value": 25
+        },
+        {
+          "name": "InvalidMigrationTarget",
+          "value": 26
+        },
+        {
+          "name": "InvalidReferrer",
+          "value": 27
+        },
+        {
+          "name": "ReferralAlreadyLocked",
+          "value": 28
+        }
+      ]
+    }
+  ]
+} as const;

@@ -7,7 +7,6 @@
 //! parses their source as plain text, so it keeps working even when the workspace
 //! itself fails to compile.
 
-mod spec;
 
 use std::collections::BTreeSet;
 use std::fs;

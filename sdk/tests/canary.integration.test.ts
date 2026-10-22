@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+// Uses test runner globals (describe, it, expect, beforeAll, afterAll)
 
 /**
  * Canary Deployment Verification Suite (Issue #657)

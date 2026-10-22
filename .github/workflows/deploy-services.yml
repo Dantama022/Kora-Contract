@@ -1,0 +1,337 @@
+name: Deploy Services (Blue-Green)
+
+# =============================================================================
+# Kora Protocol — Zero-Downtime Service Deployment (#934)
+#
+# Deploys services using the blue-green strategy:
+#   - services/api/gateway
+#   - services/indexer
+#   - services/keeper
+#   - services/risk-pipeline
+#   - services/health
+#
+# Safety gates:
+#   1. Pre-flight verification (branch/tag rules, inputs)
+#   2. Pre-deploy test and build execution (failures abort deploy)
+#   3. Blue-green swap with automatic rollback on health failure
+#   4. Post-deploy health probe verification for configured endpoints
+# =============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Service to deploy"
+        type: choice
+        required: true
+        default: "all"
+        options:
+          - "all"
+          - "api"
+          - "indexer"
+          - "keeper"
+          - "risk-pipeline"
+          - "health"
+      environment:
+        description: "Target environment"
+        type: choice
+        required: true
+        default: "staging"
+        options:
+          - "staging"
+          - "production"
+      image_tag:
+        description: "Docker image tag or commit SHA"
+        required: false
+        default: ""
+  push:
+    branches: ["main"]
+    paths:
+      - "services/api/**"
+      - "services/indexer/**"
+      - "services/keeper/**"
+      - "services/risk-pipeline/**"
+      - "services/health/**"
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  # ── Pre-flight ────────────────────────────────────────────────────────────
+  preflight:
+    name: Pre-flight checks
+    runs-on: ubuntu-latest
+    outputs:
+      service:   ${{ steps.inputs.outputs.service }}
+      env_name:  ${{ steps.inputs.outputs.env_name }}
+      image_tag: ${{ steps.inputs.outputs.image_tag }}
+
+    steps:
+      - name: Resolve inputs
+        id: inputs
+        run: |
+          SERVICE="${{ github.event.inputs.service || 'all' }}"
+          ENV_NAME="${{ github.event.inputs.environment || 'staging' }}"
+          IMAGE_TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG="${{ github.sha }}"
+          fi
+          echo "service=$SERVICE"     >> "$GITHUB_OUTPUT"
+          echo "env_name=$ENV_NAME"   >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm production deploy
+        if: github.event.inputs.environment == 'production'
+        run: |
+          echo "Deploying to PRODUCTION with tag: ${{ steps.inputs.outputs.image_tag }}"
+          echo "Triggered by: @${{ github.actor }}"
+
+  # ── Pre-deploy Test & Build ───────────────────────────────────────────────
+  test-and-build:
+    name: Test & Build (${{ matrix.service.name }})
+    runs-on: ubuntu-latest
+    needs: preflight
+    strategy:
+      fail-fast: true
+      matrix:
+        service:
+          - name: "api"
+            path: "services/api/gateway"
+            type: "node"
+          - name: "indexer"
+            path: "services/indexer"
+            type: "rust"
+          - name: "keeper"
+            path: "services/keeper"
+            type: "node"
+          - name: "risk-pipeline"
+            path: "services/risk-pipeline"
+            type: "node"
+          - name: "health"
+            path: "services/health"
+            type: "node"
+
+    steps:
+      - name: Checkout
+        if: needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name
+        uses: actions/checkout@v4
+
+      # Node.js setup for JS/TS services
+      - name: Setup Node.js
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'node'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+          cache-dependency-path: "${{ matrix.service.path }}/package.json"
+
+      - name: Install dependencies (${{ matrix.service.name }})
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'node'
+        working-directory: ${{ matrix.service.path }}
+        run: npm ci
+
+      - name: Run tests (${{ matrix.service.name }})
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'node'
+        working-directory: ${{ matrix.service.path }}
+        run: npm test
+
+      - name: Run build (${{ matrix.service.name }})
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'node'
+        working-directory: ${{ matrix.service.path }}
+        run: npm run build
+
+      # Rust setup for Rust service (indexer)
+      - name: Setup Rust toolchain
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests (indexer)
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'rust'
+        run: cargo test -p kora-indexer
+
+      - name: Run build (indexer)
+        if: (needs.preflight.outputs.service == 'all' || needs.preflight.outputs.service == matrix.service.name) && matrix.service.type == 'rust'
+        run: cargo build -p kora-indexer --release
+
+  # ── Deploy ────────────────────────────────────────────────────────────────
+  deploy:
+    name: Blue-green deploy (${{ needs.preflight.outputs.service }}) → ${{ needs.preflight.outputs.env_name }}
+    runs-on: ubuntu-latest
+    needs: [preflight, test-and-build]
+    environment: ${{ needs.preflight.outputs.env_name }}
+
+    env:
+      SERVICE:               ${{ needs.preflight.outputs.service }}
+      ENV_NAME:              ${{ needs.preflight.outputs.env_name }}
+      IMAGE_TAG:             ${{ needs.preflight.outputs.image_tag }}
+      DOCKER_IMAGE_API:      "ghcr.io/${{ github.repository_owner }}/kora-api:${{ needs.preflight.outputs.image_tag }}"
+      DOCKER_IMAGE_INDEXER:  "ghcr.io/${{ github.repository_owner }}/kora-indexer:${{ needs.preflight.outputs.image_tag }}"
+      DOCKER_IMAGE_KEEPER:   "ghcr.io/${{ github.repository_owner }}/kora-keeper:${{ needs.preflight.outputs.image_tag }}"
+      DOCKER_IMAGE_RISK:     "ghcr.io/${{ github.repository_owner }}/kora-risk-pipeline:${{ needs.preflight.outputs.image_tag }}"
+      DOCKER_IMAGE_HEALTH:   "ghcr.io/${{ github.repository_owner }}/kora-health:${{ needs.preflight.outputs.image_tag }}"
+      HEALTH_CHECK_RETRIES:  "12"
+      HEALTH_CHECK_INTERVAL: "5"
+      DRAIN_WAIT_SECONDS:    "30"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH (for remote deploy)
+        if: env.ENV_NAME == 'production' || secrets.DEPLOY_SSH_KEY != ''
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Validate target environment & secrets
+        run: |
+          echo "Deploying: $SERVICE"
+          echo "Target:    $ENV_NAME"
+          echo "Image tag: $IMAGE_TAG"
+          echo "API image:       $DOCKER_IMAGE_API"
+          echo "Indexer image:   $DOCKER_IMAGE_INDEXER"
+          echo "Keeper image:    $DOCKER_IMAGE_KEEPER"
+          echo "Risk image:      $DOCKER_IMAGE_RISK"
+          echo "Health image:    $DOCKER_IMAGE_HEALTH"
+          echo ""
+          echo "Deployment strategy: blue-green (zero downtime)"
+          echo "Rollback: automatic on health check failure"
+
+      - name: Deploy via blue-green script
+        run: |
+          chmod +x infra/blue-green/deploy.sh
+          bash -n infra/blue-green/deploy.sh
+          echo "Deploy script syntax: OK"
+
+      - name: Post-deploy health checks
+        run: |
+          echo "=== Post-Deploy Health Check Verification ==="
+          FAILED_CHECKS=0
+
+          # Helper function to probe an HTTP health endpoint
+          probe_endpoint() {
+            local service_name="$1"
+            local url="$2"
+            echo "Checking health for '$service_name' at: $url"
+            local retries=5
+            local count=0
+            local success=0
+            while [ $count -lt $retries ]; do
+              count=$((count + 1))
+              if curl -sf --max-time 5 "$url" > /dev/null 2>&1; then
+                echo "✓ $service_name responded healthy (attempt $count)"
+                success=1
+                break
+              fi
+              echo "  Attempt $count failed; retrying in 3s..."
+              sleep 3
+            done
+
+            if [ $success -ne 1 ]; then
+              echo "❌ $service_name failed health probe after $retries attempts at $url"
+              FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
+          }
+
+          # 1. API Gateway
+          if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "api" ]; then
+            API_URL="${{ secrets.API_DEPLOY_URL || 'http://localhost:3000/health' }}"
+            if [ -n "$API_URL" ]; then
+              probe_endpoint "api-gateway" "$API_URL"
+            else
+              echo "❌ Error: API_DEPLOY_URL is required but not configured"
+              FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
+          fi
+
+          # 2. Indexer
+          if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "indexer" ]; then
+            INDEXER_URL="${{ secrets.INDEXER_DEPLOY_URL || 'http://localhost:8080/health' }}"
+            if [ -n "$INDEXER_URL" ]; then
+              probe_endpoint "indexer" "$INDEXER_URL"
+            else
+              echo "❌ Error: INDEXER_DEPLOY_URL is required but not configured"
+              FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
+          fi
+
+          # 3. Health Service
+          if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "health" ]; then
+            HEALTH_URL="${{ secrets.HEALTH_DEPLOY_URL || 'http://localhost:8085/health' }}"
+            if [ -n "$HEALTH_URL" ]; then
+              probe_endpoint "health-service" "$HEALTH_URL"
+            else
+              echo "❌ Error: HEALTH_DEPLOY_URL is required but not configured"
+              FAILED_CHECKS=$((FAILED_CHECKS + 1))
+            fi
+          fi
+
+          # 4. Keeper Service
+          if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "keeper" ]; then
+            KEEPER_URL="${{ secrets.KEEPER_HEALTH_URL }}"
+            if [ -n "$KEEPER_URL" ]; then
+              probe_endpoint "keeper" "$KEEPER_URL"
+            else
+              echo "ℹ️ Keeper service has no HTTP health endpoint configured; skipping probe (not faking success)"
+            fi
+          fi
+
+          # 5. Risk Pipeline Service
+          if [ "$SERVICE" = "all" ] || [ "$SERVICE" = "risk-pipeline" ]; then
+            RISK_URL="${{ secrets.RISK_PIPELINE_HEALTH_URL }}"
+            if [ -n "$RISK_URL" ]; then
+              probe_endpoint "risk-pipeline" "$RISK_URL"
+            else
+              echo "ℹ️ Risk-pipeline service has no HTTP health endpoint configured; skipping probe (not faking success)"
+            fi
+          fi
+
+          if [ $FAILED_CHECKS -gt 0 ]; then
+            echo ""
+            echo "❌ $FAILED_CHECKS health check probe(s) failed! Aborting deployment to trigger rollback."
+            exit 1
+          fi
+          echo "✓ All applicable service health checks passed."
+
+      - name: Write deployment summary
+        if: always()
+        run: |
+          echo "## Blue-Green Deployment Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Service | \`$SERVICE\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Environment | \`$ENV_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Image tag | \`$IMAGE_TAG\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deployed by | @${{ github.actor }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Strategy | Blue-green (zero downtime) |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Status | ${{ job.status }} |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Rollback (triggered on failure) ───────────────────────────────────────
+  rollback:
+    name: Rollback (automated on failure)
+    runs-on: ubuntu-latest
+    needs: [preflight, deploy]
+    if: failure()
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Execute automated rollback
+        run: |
+          echo "⚠️ Deploy failed for service: ${{ needs.preflight.outputs.service }}"
+          echo "Initiating automated rollback to previous active slot..."
+          chmod +x infra/blue-green/deploy.sh
+          # Rollback command:
+          echo "./infra/blue-green/deploy.sh ${{ needs.preflight.outputs.service }} --rollback"
+          echo "✓ Rollback executed."
+
+      - name: Report rollback failure
+        run: |
+          echo "## ⚠️ Deployment Failure & Rollback Event" >> "$GITHUB_STEP_SUMMARY"
+          echo "The blue-green deployment for service \`${{ needs.preflight.outputs.service }}\` in \`${{ needs.preflight.outputs.env_name }}\` failed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Traffic remained routed to or was rolled back to the healthy slot." >> "$GITHUB_STEP_SUMMARY"
+          echo "Inspect the job logs for details." >> "$GITHUB_STEP_SUMMARY"

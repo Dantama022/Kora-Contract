@@ -38,6 +38,16 @@ use soroban_sdk::IntoVal;
 
 pub const SCHEMA_VERSION: u32 = 2;
 
+#[soroban_sdk::contractclient(name = "AccessControlClient")]
+pub trait AccessControlInterface {
+    fn is_paused(env: &Env) -> bool;
+}
+
+#[soroban_sdk::contractclient(name = "RiskRegistryClient")]
+pub trait RiskRegistryInterface {
+    fn get_sme_profile(env: &Env, sme: &Address) -> Result<kora_shared::types::SmeProfile, KoraError>;
+}
+
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -124,6 +134,8 @@ impl From<InvoiceNftError> for KoraError {
             InvoiceNftError::MintRateLimitExceeded => KoraError::MintRateLimitExceeded,
             InvoiceNftError::InvalidParameterValue => KoraError::InvalidParameterValue,
             InvoiceNftError::InvalidMigrationTarget => KoraError::InvalidParameterValue,
+            InvoiceNftError::InvalidReferrer => KoraError::InvalidAddress,
+            InvoiceNftError::ReferralAlreadyLocked => KoraError::Unauthorized,
         }
     }
 }
@@ -477,8 +489,7 @@ impl InvoiceNftContract {
         env.storage().instance().set(&DataKey::DebtorAttestation, &attestation);
         Self::append_audit_entry(&env, &admin, AdminActionType::InvoiceNftSetDebtorAttestation);
         // Standardized configuration event; field_tag 7 = debtor_attestation.
-        let zero = Address::generate(&env);
-        events::dependency_updated(&env, &admin, 7u32, old.as_ref().unwrap_or(&zero), &attestation);
+        events::dependency_updated(&env, &admin, 7u32, old.as_ref().unwrap_or(&attestation), &attestation);
         Ok(())
     }
 
@@ -666,7 +677,7 @@ impl InvoiceNftContract {
             .ok_or(InvoiceNftError::ArithmeticOverflow)?;
 
         if let Some(rr_addr) = env.storage().instance().get::<DataKey, Address>(&DataKey::RiskRegistry) {
-            let rr = kora_risk_registry::RiskRegistryContractClient::new(&env, &rr_addr);
+            let rr = RiskRegistryClient::new(&env, &rr_addr);
             if let Ok(Ok(profile)) = rr.try_get_sme_profile(&sme) {
                 if profile.credit_limit > 0 && new_exposure > profile.credit_limit {
                     return Err(InvoiceNftError::CreditLimitExceeded);
@@ -1472,7 +1483,7 @@ impl InvoiceNftContract {
             .instance()
             .get(&DataKey::RiskRegistry)
             .ok_or(InvoiceNftError::NotInitialized)?;
-        let rr = kora_risk_registry::RiskRegistryContractClient::new(&env, &rr_addr);
+        let rr = RiskRegistryClient::new(&env, &rr_addr);
         let profile = rr
             .try_get_sme_profile(&hot.sme)
             .map_err(|_| InvoiceNftError::SMENotRegistered)?
@@ -1636,7 +1647,7 @@ impl InvoiceNftContract {
             .instance()
             .get(&DataKey::AccessControl)
             .ok_or(InvoiceNftError::NotInitialized)?;
-        let client = kora_access_control::AccessControlContractClient::new(env, &ac);
+        let client = AccessControlClient::new(env, &ac);
         if client.is_paused() {
             return Err(InvoiceNftError::ProtocolPaused);
         }

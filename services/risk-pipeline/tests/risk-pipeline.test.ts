@@ -84,11 +84,79 @@ describe("risk-pipeline (issue #755)", () => {
 
   test("payment history penalizes defaults and rewards clean records", () => {
     const f = new PaymentHistoryFactor();
+    expect(f.describe()).toContain("SME repayment discipline");
     const clean = f.evaluate({ sme: { repayments: [{ paidOnTime: true }, { paidOnTime: true }], defaults: 0 } });
     const bad = f.evaluate({ sme: { repayments: [{ paidOnTime: false }], defaults: 2 } });
     expect(clean.score).toBeLessThan(bad.score);
     const missing = f.evaluate({});
     expect(missing.missing).toBe(true);
     expect(missing.confidence).toBe(0);
+  });
+
+  test("additional factor and formula coverage", () => {
+    const { InvoiceFrequencyFactor, DebtorConcentrationFactor, MacroTradeFactor } = require("../src/factors");
+    const invFactor = new InvoiceFrequencyFactor();
+    expect(invFactor.describe()).toContain("cadence");
+    const dormant = invFactor.evaluate({ sme: { totalInvoices: 0, invoicesLast90d: 0 } });
+    expect(dormant.score).toBe(75);
+
+    const debtorFactor = new DebtorConcentrationFactor();
+    expect(debtorFactor.describe()).toContain("HHI");
+    const emptyDebtors = debtorFactor.evaluate({ debtors: [] });
+    expect(emptyDebtors.missing).toBe(true);
+
+    const macroFactor = new MacroTradeFactor();
+    expect(macroFactor.describe()).toContain("Systematic");
+    const emptyMacro = macroFactor.evaluate({});
+    expect(emptyMacro.missing).toBe(true);
+
+    const registry = new FormulaRegistry();
+    expect(registry.latest().version).toBe("v2");
+    expect(() =>
+      registry.register({
+        version: "v_invalid",
+        changelog: "test",
+        weights: { payment_history: 0.2, invoice_frequency: 0.2, debtor_concentration: 0.2, macro_trade: 0.2 },
+      })
+    ).toThrow(/weights must sum to 1/);
+
+    const pipeline = new RiskPipeline();
+    // Use default latest version
+    const defaultRes = pipeline.score({ sme: { totalInvoices: 5, invoicesLast90d: 2 } });
+    expect(defaultRes.formulaVersion).toBe("v2");
+
+    // Test macro factor partial inputs (stress only, fxVol only)
+    const macroStressOnly = macroFactor.evaluate({ macro: { stressIndex: 40 } });
+    expect(macroStressOnly.confidence).toBe(0.5);
+    const macroFxOnly = macroFactor.evaluate({ macro: { fxVolatilityBps: 200 } });
+    expect(macroFxOnly.confidence).toBe(0.5);
+    const macroBoth = macroFactor.evaluate({ macro: { stressIndex: 40, fxVolatilityBps: 200 } });
+    expect(macroBoth.confidence).toBe(0.9);
+
+    // Test invoice frequency with small total (< 5)
+    const lowTotal = invFactor.evaluate({ sme: { totalInvoices: 2, invoicesLast90d: 1 } });
+    expect(lowTotal.score).toBeGreaterThan(0);
+
+    // Test payment history with 0 repayments but > 0 defaults
+    const defaultsOnly = (new PaymentHistoryFactor()).evaluate({ sme: { repayments: [], defaults: 1 } });
+    expect(defaultsOnly.score).toBe(8);
+
+    // Test debtor factor with multiple debtors having known and unknown scores
+    const mixedDebtors = debtorFactor.evaluate({
+      debtors: [
+        { debtorHash: "d1", exposureShareBps: 4000, avgDebtorScore: 20 },
+        { debtorHash: "d2", exposureShareBps: 6000 },
+      ],
+    });
+    expect(mixedDebtors.score).toBeGreaterThan(0);
+
+    // Test formula validation for negative weight
+    expect(() =>
+      registry.register({
+        version: "v_neg",
+        changelog: "test",
+        weights: { payment_history: 1.2, invoice_frequency: -0.2, debtor_concentration: 0, macro_trade: 0 },
+      })
+    ).toThrow(/bad weight/);
   });
 });

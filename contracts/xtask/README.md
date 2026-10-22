@@ -69,3 +69,25 @@ is declared on the `KoraError` enum in `contracts/shared/src/errors.rs`.
 ```sh
 cargo run -p kora-xtask --bin check-error-variants
 ```
+
+## extract-spec (issue #937)
+
+Extracts ABI and contract specifications (`contractspecv0`) from compiled Soroban WASM files using `soroban-spec` and `stellar-xdr`.
+
+```sh
+# Extract spec for a single contract as deterministic JSON:
+cargo run -p kora-xtask --bin extract-spec -- target/wasm32-unknown-unknown/release/kora_invoice_nft.wasm
+
+# Extract to a specified file:
+cargo run -p kora-xtask --bin extract-spec -- target/wasm32-unknown-unknown/release/kora_invoice_nft.wasm --out specs/invoice_nft.spec.json
+
+# Batch extract all contracts in a directory into interface text format:
+cargo run -p kora-xtask --bin extract-spec -- --dir target/wasm32-unknown-unknown/release --out specs/ --format text
+```
+
+### Options:
+- `[WASM_FILES...]`: One or more paths to compiled `.wasm` files.
+- `--dir <DIRECTORY>`: Directory containing `.wasm` files to extract in batch.
+- `--out <PATH>`: Output destination (file or directory). Defaults to `stdout`.
+- `--format <json|text>`: Output format (`json` by default, or `text`/`interface` for interface compatibility checks).
+

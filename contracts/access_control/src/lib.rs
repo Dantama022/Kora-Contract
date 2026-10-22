@@ -936,8 +936,8 @@ impl AccessControlContract {
                 Self::bump_persistent(&env, &DataKey::Role(new_admin.clone()));
                 events::admin_transferred(&env, &executor, &new_admin);
             }
-            AdminAction::RotateAdmin(new_admin) => {
-                Self::execute_admin_rotation(&env, &executor, &new_admin, &proposal)?;
+            AdminAction::RotateAdmin(ref new_admin) => {
+                Self::execute_admin_rotation(&env, &executor, new_admin, &proposal)?;
             }
             AdminAction::ResolveDispute(resolver, invoice_id, upheld) => {
                 // Issue #671: Governance-gated dispute resolution
@@ -1891,7 +1891,7 @@ impl AccessControlContract {
 
     /// Initiate a structured rotation election for an expiring or expired council seat.
     /// Can be initiated by any active signer or admin.
-    pub fn initiate_council_rotation_election(
+    pub fn init_council_rotation(
         env: Env,
         initiator: Address,
         expiring_seat: Address,
@@ -1975,7 +1975,7 @@ impl AccessControlContract {
     /// Invariant: Safe minimum quorum is preserved throughout transition.
     /// An expiring seat's authority only lapses once replacement is confirmed.
     /// If election fails, automatic term extension activates pending a new election.
-    pub fn conclude_council_rotation_election(
+    pub fn conclude_council_rotation(
         env: Env,
         caller: Address,
         election_id: u64,

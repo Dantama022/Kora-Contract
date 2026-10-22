@@ -139,6 +139,12 @@ shift_traffic() {
     api-green)    new_port=3002 ;;
     indexer-blue) new_port=8081 ;;
     indexer-green) new_port=8082 ;;
+    health-blue)  new_port=8085 ;;
+    health-green) new_port=8086 ;;
+    keeper-*|risk-pipeline-*)
+      log_info "No reverse-proxy traffic shift needed for worker service: $service"
+      return 0
+      ;;
     *)
       log_error "Unknown service/colour combo: ${service}/${new_colour}"
       return 1
@@ -179,8 +185,11 @@ deploy_service() {
   log_info "Deploying $service: $active_colour → $new_colour"
 
   case "$service" in
-    api)     image_var="DOCKER_IMAGE_API" ;;
-    indexer) image_var="DOCKER_IMAGE_INDEXER" ;;
+    api)           image_var="DOCKER_IMAGE_API" ;;
+    indexer)       image_var="DOCKER_IMAGE_INDEXER" ;;
+    keeper)        image_var="DOCKER_IMAGE_KEEPER" ;;
+    risk-pipeline) image_var="DOCKER_IMAGE_RISK" ;;
+    health)        image_var="DOCKER_IMAGE_HEALTH" ;;
     *)
       log_error "Unknown service: $service"
       return 1
@@ -211,20 +220,28 @@ deploy_service() {
 
   # ── Step 2: Health check new instance ────────────────────────────────────
 
-  local health_url
+  local health_url=""
   case "${service}-${new_colour}" in
-    api-blue)      health_url="http://localhost:3001/health" ;;
-    api-green)     health_url="http://localhost:3002/health" ;;
-    indexer-blue)  health_url="http://localhost:8081/health" ;;
-    indexer-green) health_url="http://localhost:8082/health" ;;
+    api-blue)            health_url="http://localhost:3001/health" ;;
+    api-green)           health_url="http://localhost:3002/health" ;;
+    indexer-blue)        health_url="http://localhost:8081/health" ;;
+    indexer-green)       health_url="http://localhost:8082/health" ;;
+    health-blue)         health_url="http://localhost:8085/health" ;;
+    health-green)        health_url="http://localhost:8086/health" ;;
+    keeper-*)            health_url="${KEEPER_HEALTH_URL:-}" ;;
+    risk-pipeline-*)     health_url="${RISK_PIPELINE_HEALTH_URL:-}" ;;
   esac
 
-  if ! health_check "${service}/${new_colour}" "$health_url"; then
-    log_error "New instance failed health check — rolling back"
-    docker compose -f "$COMPOSE_FILE" stop "${service}-${new_colour}"
-    docker compose -f "$COMPOSE_FILE" rm -f "${service}-${new_colour}"
-    log_info "Rollback complete. $service/$active_colour remains active."
-    return 1
+  if [ -n "$health_url" ]; then
+    if ! health_check "${service}/${new_colour}" "$health_url"; then
+      log_error "New instance failed health check — rolling back"
+      docker compose -f "$COMPOSE_FILE" stop "${service}-${new_colour}"
+      docker compose -f "$COMPOSE_FILE" rm -f "${service}-${new_colour}"
+      log_info "Rollback complete. $service/$active_colour remains active."
+      return 1
+    fi
+  else
+    log_info "ℹ️ ${service}: No HTTP health endpoint configured; skipping probe (not faking success)"
   fi
 
   # ── Step 3: Shift traffic ─────────────────────────────────────────────────
@@ -236,20 +253,26 @@ deploy_service() {
   log_info "Post-cutover stabilisation check (${HEALTH_CHECK_RETRIES} × ${HEALTH_CHECK_INTERVAL}s) ..."
   sleep 5 # brief pause for traffic to settle
 
-  local post_health_url
+  local post_health_url=""
   case "$service" in
-    api)     post_health_url="http://localhost:80/health" ;; # via nginx
-    indexer) post_health_url="http://localhost:80/indexer/health" ;;
+    api)           post_health_url="http://localhost:80/health" ;; # via nginx
+    indexer)       post_health_url="http://localhost:80/indexer/health" ;;
+    health)        post_health_url="http://localhost:8085/health" ;;
+    keeper|risk-pipeline)
+      post_health_url=""
+      ;;
   esac
 
-  if ! health_check "${service} (via nginx)" "$post_health_url"; then
-    log_error "Post-cutover health check failed — automated rollback!"
-    shift_traffic "$service" "$active_colour"
-    sleep 2
-    docker compose -f "$COMPOSE_FILE" stop "${service}-${new_colour}"
-    docker compose -f "$COMPOSE_FILE" rm -f "${service}-${new_colour}"
-    log_info "Automated rollback complete. Traffic restored to $service/$active_colour."
-    return 1
+  if [ -n "$post_health_url" ]; then
+    if ! health_check "${service} (via nginx)" "$post_health_url"; then
+      log_error "Post-cutover health check failed — automated rollback!"
+      shift_traffic "$service" "$active_colour"
+      sleep 2
+      docker compose -f "$COMPOSE_FILE" stop "${service}-${new_colour}"
+      docker compose -f "$COMPOSE_FILE" rm -f "${service}-${new_colour}"
+      log_info "Automated rollback complete. Traffic restored to $service/$active_colour."
+      return 1
+    fi
   fi
 
   # ── Step 5: Record new active colour ─────────────────────────────────────
@@ -305,25 +328,41 @@ echo ""
 
 if [ "$ROLLBACK_MODE" = "--rollback" ]; then
   case "$SERVICE" in
-    api)     rollback_service api ;;
-    indexer) rollback_service indexer ;;
-    both)
+    api)           rollback_service api ;;
+    indexer)       rollback_service indexer ;;
+    keeper)        rollback_service keeper ;;
+    risk-pipeline) rollback_service risk-pipeline ;;
+    health)        rollback_service health ;;
+    both|all)
       rollback_service api
       rollback_service indexer
+      rollback_service keeper
+      rollback_service risk-pipeline
+      rollback_service health
       ;;
   esac
   exit 0
 fi
 
 case "$SERVICE" in
-  api)     deploy_service api ;;
-  indexer) deploy_service indexer ;;
+  api)           deploy_service api ;;
+  indexer)       deploy_service indexer ;;
+  keeper)        deploy_service keeper ;;
+  risk-pipeline) deploy_service risk-pipeline ;;
+  health)        deploy_service health ;;
   both)
     deploy_service api
     deploy_service indexer
     ;;
+  all)
+    deploy_service api
+    deploy_service indexer
+    deploy_service keeper
+    deploy_service risk-pipeline
+    deploy_service health
+    ;;
   *)
-    log_error "Unknown service: $SERVICE. Use: api | indexer | both"
+    log_error "Unknown service: $SERVICE. Use: api | indexer | keeper | risk-pipeline | health | both | all"
     exit 1
     ;;
 esac

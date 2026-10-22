@@ -11,8 +11,16 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 MAIN_SPECS_DIR="${1:-$ROOT_DIR/specs/main}"
 PR_SPECS_DIR="${2:-$ROOT_DIR/specs/pr}"
 PR_LABELS="${3:-}"
+WASM_DIR="${4:-}"
 
-echo "=== Kora Protocol — Interface Compatibility Checker ==="
+echo "=== Kora Protocol — Interface Compatibility Checker (#793 & #937) ==="
+
+# If WASM directory is provided, extract real WASM contract specs using extract-spec
+if [ -n "$WASM_DIR" ] && [ -d "$WASM_DIR" ]; then
+  echo "Extracting real contract specifications from WASM directory: $WASM_DIR"
+  mkdir -p "$PR_SPECS_DIR"
+  cargo run -p kora-xtask --bin extract-spec -- --dir "$WASM_DIR" --out "$PR_SPECS_DIR" --format text
+fi
 
 CONTRACTS="access_control financing_pool invoice_nft marketplace price_oracle risk_registry treasury"
 HAS_BREAKING=0
@@ -20,6 +28,14 @@ HAS_BREAKING=0
 for c in $CONTRACTS; do
   main_spec="$MAIN_SPECS_DIR/${c}.txt"
   pr_spec="$PR_SPECS_DIR/${c}.txt"
+
+  # Also check .json extension if txt doesn't exist
+  if [ ! -f "$main_spec" ] && [ -f "$MAIN_SPECS_DIR/${c}.json" ]; then
+    main_spec="$MAIN_SPECS_DIR/${c}.json"
+  fi
+  if [ ! -f "$pr_spec" ] && [ -f "$PR_SPECS_DIR/${c}.json" ]; then
+    pr_spec="$PR_SPECS_DIR/${c}.json"
+  fi
 
   if [ ! -f "$main_spec" ]; then
     continue

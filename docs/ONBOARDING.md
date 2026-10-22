@@ -130,9 +130,25 @@ by the #912/#911 onboarding change; verification was restricted to static review
    ```bash
    make fmt && make lint && cargo test --all
    ```
-6. Open the PR against `develop`, fill in the template completely, and link
-   the issue it closes.
-7. Add yourself to [`CONTRIBUTORS.md`](../CONTRIBUTORS.md) in the same PR.
+### Contract Spec Extraction & Interface Compatibility (Issue #937)
+
+When updating public contract entrypoints or specification types:
+1. Compile the contract to WASM:
+   ```bash
+   cargo +stable build --target wasm32-unknown-unknown --release -p kora-<contract>
+   ```
+2. Extract the updated specification using `extract-spec`:
+   ```bash
+   cargo +stable run -p kora-xtask --bin extract-spec -- target/wasm32-unknown-unknown/release/kora_<contract>.wasm --out contracts/xtask/tests/fixtures/<contract>.spec.json
+   ```
+3. Regenerate SDK types:
+   ```bash
+   node --experimental-strip-types sdk/scripts/generate-types.ts
+   ```
+4. Verify interface compatibility:
+   ```bash
+   bash scripts/check-interface-compat.sh
+   ```
 
 ---
 
